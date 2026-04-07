@@ -1,0 +1,282 @@
+openapi: 3.0.0
+info:
+  title: Agent OS API
+  description: Agent Operating System - REST API Specification
+  version: v1.0.0
+  contact:
+    name: Agent OS Team
+    email: contact@agentos.dev
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: https://api.agentos.dev/v1
+    description: Production API
+  - url: http://localhost:8080/api/v1
+    description: Development API
+
+tags:
+  - name: agents
+    description: Agent lifecycle management
+  - name: monitoring
+    description: Monitoring and observability
+  - name: admin
+    description: Administrative operations
+
+paths:
+  /health:
+    get:
+      tags: [admin]
+      summary: Health check
+      description: Check API health status
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics:
+    get:
+      tags: [monitoring]
+      summary: Prometheus-style metrics
+      responses:
+        '200':
+          description: Metrics in text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /agents:
+    get:
+      tags: [agents]
+      summary: List agents
+      description: Get paginated list of agents
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Agent list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentList'
+        '401':
+          description: Unauthorized
+    post:
+      tags: [agents]
+      summary: Create agent
+      description: Create a new agent instance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+      responses:
+        '201':
+          description: Agent created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+
+  /agents/{agentId}:
+    parameters:
+      - in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [agents]
+      summary: Get agent by ID
+      responses:
+        '200':
+          description: Agent retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [agents]
+      summary: Update agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: Agent updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          description: Invalid request
+        '404':
+          description: Agent not found
+    delete:
+      tags: [agents]
+      summary: Delete agent
+      responses:
+        '204':
+          description: Agent deleted successfully
+        '404':
+          description: Agent not found
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, shutting_down]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: string
+        version:
+          type: string
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+        image:
+          type: string
+        runtime:
+          type: string
+        status:
+          type: string
+          enum: [pending, creating, running, stopping, stopped, error]
+        resources:
+          type: object
+          additionalProperties:
+            type: string
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CreateAgentRequest:
+      type: object
+      required: [name, image]
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        runtime:
+          type: string
+        resources:
+          type: object
+          additionalProperties:
+            type: string
+
+    UpdateAgentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        runtime:
+          type: string
+        status:
+          type: string
+          enum: [pending, creating, running, stopping, stopped, error]
+        resources:
+          type: object
+          additionalProperties:
+            type: string
+
+    AgentList:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []

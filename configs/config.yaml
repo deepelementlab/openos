@@ -1,0 +1,136 @@
+# Agent OS Configuration
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "release"  # debug, release, test
+  graceful_shutdown_timeout: 30  # seconds
+  
+# Logging Configuration
+logging:
+  level: "info"  # debug, info, warn, error, fatal
+  format: "json"  # json, console
+  output: "stdout"  # stdout, file
+  file_path: "logs/aos.log"
+  max_size: 100  # MB
+  max_backups: 10
+  max_age: 30  # days
+
+# Database Configuration
+database:
+  driver: "postgres"
+  host: "localhost"
+  port: 5432
+  name: "aos"
+  username: "aos_user"
+  password: "aos_password"
+  ssl_mode: "disable"
+  max_open_conns: 100
+  max_idle_conns: 20
+  conn_max_lifetime: 300  # seconds
+
+# Redis Configuration (for caching and sessions)
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 100
+  min_idle_conns: 10
+
+# Container Runtime Configuration
+container:
+  runtime: "containerd"  # containerd, docker
+  socket: "/run/containerd/containerd.sock"
+  network_driver: "bridge"
+  storage_driver: "overlay2"
+  default_memory_limit: "512Mi"
+  default_cpu_limit: "0.5"
+  default_pids_limit: 100
+  default_network_bandwidth: "10M"
+
+# Resource Scheduler Configuration
+scheduler:
+  algorithm: "round_robin"  # round_robin, least_loaded, priority
+  max_concurrent_agents: 100
+  max_agents_per_host: 20
+  check_interval: 10  # seconds
+  auto_scale: false
+  scale_up_threshold: 80  # CPU utilization percentage
+  scale_down_threshold: 20
+
+# Security Configuration
+security:
+  jwt_secret: "change-this-in-production"
+  jwt_expiry: 24  # hours
+  cors_enabled: true
+  cors_allowed_origins: ["*"]
+  rate_limit_enabled: true
+  rate_limit_requests: 100  # requests per minute
+  rate_limit_burst: 10
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  prometheus_enabled: true
+  prometheus_path: "/metrics"
+  health_check_path: "/health"
+  metrics_collection_interval: 15  # seconds
+  alerting_enabled: false
+  alert_manager_url: ""
+
+# Agent Configuration
+agent:
+  default_image: "agentos/base:latest"
+  default_working_dir: "/app"
+  allowed_registries: ["docker.io", "ghcr.io", "quay.io"]
+  max_image_size: "1Gi"
+  max_execution_time: 3600  # seconds
+  auto_restart: true
+  restart_policy: "on-failure"  # on-failure, always, never
+
+# API Configuration
+api:
+  swagger_enabled: true
+  swagger_path: "/swagger/*"
+  api_prefix: "/api/v1"
+  enable_caching: true
+  cache_duration: 300  # seconds
+
+# Cluster Configuration (for future multi-node support)
+cluster:
+  enabled: false
+  node_name: "node-1"
+  discovery_mode: "static"  # static, dns, etcd
+  static_nodes: []
+  leader_election_enabled: false
+  leader_election_lease: 15  # seconds
+
+# Storage Configuration
+storage:
+  type: "local"  # local, s3, nfs
+  local_path: "/var/lib/aos/storage"
+  s3_endpoint: ""
+  s3_access_key: ""
+  s3_secret_key: ""
+  s3_bucket: ""
+  s3_region: "us-east-1"
+  max_storage_per_agent: "10Gi"
+
+# Network Configuration
+network:
+  default_subnet: "172.18.0.0/16"
+  enable_ipv6: false
+  dns_servers: ["8.8.8.8", "8.8.4.4"]
+  dns_search_domains: []
+  enable_host_network: false
+  enable_port_mapping: true
+
+# Feature Flags
+features:
+  multi_tenant: false
+  gpu_support: false
+  edge_mode: false
+  backup_enabled: false
+  audit_logging: false
