@@ -4,7 +4,7 @@
 
 # OpenOS
 
-**An operating environment for AI agents** — API-first, cloud-native, and built for isolation, scheduling, and observability.
+**An operating environment for AI agents** — API-first, cloud-native, and built for isolation, scheduling, and observability. System kernel and foundational framework implementation completed.
 
 This repository contains the **Agent OS** design documents and implementation workstream. For deeper technical detail, see [`agent-os/architecture/`](agent-os/architecture/) and [`agent-os/technical-design/`](agent-os/technical-design/).
 
