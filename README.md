@@ -2,103 +2,257 @@
   <img width="256" height="256" alt="二次元卡通融合logo设计 (10)" src="https://github.com/user-attachments/assets/7dd6dd0d-10cc-431e-b164-06f307a2b44a" />
 </p>
 
-# OpenOS
+**System goal:** realize **AOS** — an **Agent Operating System** — the layer that gives autonomous software agents the same primitives a classical OS gives processes: **lifecycle, isolation, scheduling, namespaces for tenancy, messaging, and observability**, exposed primarily through **APIs**, not GUIs.
 
-**An operating environment for AI agents** — API-first, cloud-native, and built for isolation, scheduling, and observability. System kernel and foundational framework implementation completed.
+**What “AOS” means:** **AOS** abbreviates **Agent Operating System** — the architectural north star of treating **agents** as first-class units (create, schedule, run, recover, retire) with **consistent persistence and events** (for example outbox-style delivery) so behavior stays explainable under failure. **OpenOS** is the open project and codebase that implements this AOS vision.
 
-This repository contains the **Agent OS** design documents and implementation workstream. For deeper technical detail, see [`agent-os/architecture/`](agent-os/architecture/) and [`agent-os/technical-design/`](agent-os/technical-design/).
+**The control plane for long-running AI agents** — not a chat wrapper. OpenOS is an **API-first, cloud-native runtime layer** that treats agents like the OS treats processes: **lifecycle, isolation, scheduling, multi-tenancy, events, and observability** under one contract.
 
----
-
-## Design philosophy
-
-Agent OS is guided by principles that distinguish an *agent-native* platform from a traditional user-centric stack:
-
-1. **API-first** — Capabilities are exposed through APIs (REST, gRPC, WebSocket); there is no dependency on a GUI for core operations.
-2. **Agent-centric** — Scheduling, lifecycle, and resources are modeled around agents, not around interactive sessions.
-3. **Security by design** — Multi-tenant boundaries, least privilege, and strong isolation (containers/sandboxes) are first-class concerns.
-4. **Cloud-native** — Microservice-friendly boundaries, containerized workloads, and elastic scaling.
-5. **Observability** — Metrics, traces, and structured events are required for operating agents at scale.
-
-**Product stance** (from the product definition): agents run **continuously**, need **strict isolation**, and collaborate through **APIs and messaging** rather than GUIs. The system favors **declarative configuration**, **event-driven** integration, and **safe defaults**.
-
-**Governance stance** (from architecture docs): capabilities are tracked under a **single source of truth** using three lenses — **Target** (long-term), **IterationScope** (committed for the current iteration), and **Implemented** (verified in the repo). Items only move to **Implemented** when **acceptance criteria** and **evidence links** are satisfied — not when documentation alone exists.
-
-**Data philosophy**: a **thin data layer** (`internal/database` + `internal/data/*`) keeps repositories, transactions (Unit of Work), outbox, schema compatibility, and migrations explicit **without** introducing a heavyweight standalone “data microservice” in early phases.
+- **Agent-native** — Built for agents that run 24/7, call APIs, and coordinate over messages—not for point-and-click GUIs.
+- **Honest architecture** — Extensive design docs (SLOs, ADRs, compatibility matrix, thin data layer) plus a **Go reference implementation** you can build and test today.
+- **Production-minded** — Dual state machines (control plane + outbox), idempotent APIs, tenant quotas, NATS-oriented messaging, and tests from unit to e2e.
 
 ---
 
-## Technical architecture (summary)
+## What OpenOS is — and is not
 
-The high-level stack is organized in **layers** (see [`agent-os/architecture/system-architecture.md`](agent-os/architecture/system-architecture.md) and [`agent-os/architecture/tech-architecture.md`](agent-os/architecture/tech-architecture.md)):
-
-| Layer | Role (illustrative) |
-|--------|---------------------|
-| **Interface** | API gateway, CLI, dashboard — REST/OpenAPI, gRPC, WebSocket |
-| **Orchestration** | Workflow engine, service discovery, event bus |
-| **Agent** | Agent runtime, lifecycle manager, registry |
-| **Platform** | Resource scheduler, security enforcement, networking |
-| **Core services** | Storage, messaging, monitoring |
-
-**Interface contracts (v1 baseline)** include a unified error model, **idempotency** (`Idempotency-Key` on create-style APIs), path versioning (e.g. `/api/v1/...`), explicit **RBAC + tenant** requirements per API, and **event payload** minimum fields (`event_id`, `event_type`, `schema_version`, `occurred_at`, `trace_id`, `agent_id`, `tenant_id`). Cross-protocol rules are summarized in [`agent-os/architecture/api-compatibility-matrix.md`](agent-os/architecture/api-compatibility-matrix.md).
-
-**Orchestration** is specified with a **minimal control-plane state machine** (Created → Scheduled → Starting → Ready / Failed, with recovery and compensation) and a **consistency / outbox state machine** (Persisted → OutboxWritten → Published → Acknowledged, with replay and dead-letter paths). The two must align: e.g. control flow should not reach **Ready** unless the consistency stream has at least reached a **Published**-class state where required.
-
-**Thin data layer** (see [`agent-os/architecture/data-layer-blueprint.md`](agent-os/architecture/data-layer-blueprint.md)): repositories hide SQL from upper layers; **Unit of Work** bundles business writes, outbox writes, and audit writes; **OutboxPublisher** handles delivery semantics only; **SchemaRegistry** owns `schema_version` and compatibility checks.
-
-**MVP / current implementation note**: the long-term interface story includes Envoy and a rich gateway; the **near-term** path documented in-repo uses an **in-process HTTP server** in Go (`internal/server`) for health, metrics, and baseline routing, with room to evolve toward a sidecar or standalone gateway.
-
-**Messaging ADR**: NATS-first messaging is recorded under [`agent-os/architecture/adr/`](agent-os/architecture/adr/).
-
-**Stack highlights** (from architecture docs): **Go** for the core, **Kubernetes-oriented** scheduling and platform concepts, **PostgreSQL / Redis / S3-compatible** storage patterns, **NATS/Kafka-compatible** messaging, **Prometheus-compatible** metrics.
+| OpenOS **is** | OpenOS **is not** |
+|-----------------|---------------------|
+| Infrastructure to **run, schedule, and isolate** agents with a real control plane | A single-model **LLM SDK** or prompt toolkit |
+| A **layered platform** (interface → orchestration → agent runtime → platform → core services) | A hosted SaaS product (this repo is **code + specs**) |
+| A place to attach **gRPC/HTTP**, **PostgreSQL**, **NATS**, **container runtimes** | A finished “drop in prod with zero ops” appliance |
 
 ---
 
-## Validation, SLO targets & release posture
+## Why OpenOS exists
 
-This project does **not** define a financial “backtesting” workflow. Instead, **reliability and quality are framed as measurable SLIs/SLOs, CI data gates, and release gates** so that behavior can be validated before and after rollout.
+Traditional stacks assume **human-driven** sessions. Agents need **continuous execution**, **predictable resources**, **strong isolation**, and **machine-readable contracts**. Teams stitching together ad-hoc scripts, containers, and queues hit the same walls: **no unified lifecycle**, **weak tenant boundaries**, **inconsistent retries**, and **no shared observability model**.
 
-### Key SLI / SLO targets (documented baselines)
+OpenOS answers with:
 
-| Area | SLI | Target | Window |
-|------|-----|--------|--------|
-| Agent start | Success rate | ≥ 99.0% | 7-day rolling |
-| Agent start | P95 latency | ≤ 5s | 24h |
-| Control-plane API | Error rate | ≤ 1.0% | 24h |
-| Outbox delivery | Success rate | ≥ 99.5% | 24h |
-| Event consumption | ACK latency P95 | ≤ 2s | 24h |
-
-**Error budget** rules tie SLO breaches to release policy (freeze features, gate releases, or allow only fixes/rollbacks). Details: [`agent-os/architecture/slo-release-gate.md`](agent-os/architecture/slo-release-gate.md).
-
-### CI data gates (automation targets)
-
-Gate-1–4 (migrations, schema compat, outbox/idempotency, idempotency key policy) are intended to **block merges** when violated; Gate-5–6 (observability fields, evidence for high-risk items) **block release** until satisfied. See [`agent-os/architecture/ci-data-gates.md`](agent-os/architecture/ci-data-gates.md).
-
-### Product-level success metrics (aspirational)
-
-The product summary cites targets such as **API P95 &lt; 50ms**, **availability ≥ 99.9%**, **resource utilization ≥ 75%**, and **1000+ concurrent agents** — as **north-star** engineering goals, not a guarantee of current measurements. See [`agent-os/summary-overview.md`](agent-os/summary-overview.md).
+1. **One lifecycle model** — From create → schedule → start → ready/fail, with compensation paths spelled out.
+2. **One consistency story** — Persisted state + outbox-style delivery so “published” means something under failure.
+3. **One front door** — REST/gRPC/WebSocket direction with shared errors, idempotency, and versioning (see architecture docs).
+4. **Multi-tenancy by design** — Tenant context, quotas, and interceptors on the API path (where implemented).
+5. **Ops you can reason about** — SLI/SLO targets, error budgets, and CI data gates documented—not an afterthought.
 
 ---
 
-## Project status & what is delivered
+## Key capabilities (implementation + design)
 
-### Versioning
+The Go module under `agent-os/implementation` (`github.com/agentos/aos`, Go **1.22+**) includes:
 
-The implementation build is aligned with **v0.1.0** (see `VERSION` in [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile)).
+| Area | What you will find |
+|------|---------------------|
+| **CLI & process** | Cobra-based **`aos`** binary: config path (`-c`/`--config`, default `config.yaml`), debug flag, graceful shutdown. |
+| **HTTP control plane** | Server package with health/metrics-style endpoints and middleware; baseline for MVP gateway (ADR: in-process first, Envoy as target). |
+| **gRPC** | Agent and tenant services, protobuf v1 APIs, interceptors for **auth**, **tenant**, **quota**, **metrics** (see `api/grpc`, `api/proto`). |
+| **Agent runtime** | CRI-style abstractions; **containerd** integration; **gVisor** / **Kata** packages and tests toward sandboxed execution. |
+| **Orchestration** | Workflow engine, **saga** coordinator, state machine transitions, compensation paths—**with tests**. |
+| **Discovery** | Registry-style discovery with **round-robin / least-conn / weighted** balancers and tests. |
+| **Scheduling** | Scheduler interfaces and **failover-oriented** scheduling code paths with tests. |
+| **Data & migrations** | PostgreSQL-oriented **migration manager**, connection pool/retry helpers, repositories (e.g. agent, tenant), extended data repository patterns. |
+| **Messaging** | NATS client wrappers, publisher/subscriber, routing, serde, deliverer—**with tests**. |
+| **Security hooks** | OPA client scaffolding and policy-oriented tests (policy as code direction). |
+| **Quality** | `go test` across packages; **race** in Makefile test targets; **benchmarks** (`test/benchmarks`); **smoke** and **e2e** tests. |
 
-### What v0.1.0 represents
+**Thin data layer (design):** repositories, Unit of Work, outbox, schema registry, and migrations—without a separate “data microservice” in early phases. See [`agent-os/architecture/data-layer-blueprint.md`](agent-os/architecture/data-layer-blueprint.md).
 
-- **Kernel-oriented foundation**: runtime interfaces, substantial **containerd** integration work, partial **gVisor** integration, and shared **lifecycle / types / security** modeling in the runtime area.
-- **Framework & operations baseline**: **configuration** system with tests, **health** checks with tests, **HTTP server** skeleton (`internal/server`) with health/metrics-style endpoints, **scheduler interfaces** and scaffolding (algorithms and full policy still evolving), **basic monitoring** hooks.
-- **Architecture & governance artifacts**: layered architecture, dual state machines, thin data layer blueprint, API compatibility matrix, ADRs (e.g. API gateway MVP path, NATS-first messaging), SLO/release and CI data gate specifications, and capability tracking (Target / IterationScope / Implemented).
+---
 
-### MVP scope (planning)
+## Status at a glance
 
-The MVP timeline was adjusted to a **6-month** horizon with phased delivery (technical validation → core components → integration and testing). See [`agent-os/mvp-adjustment-summary.md`](agent-os/mvp-adjustment-summary.md).
+Rough classification for expectations (always check the code for ground truth):
 
-### Honest gap summary (from implementation reviews)
+| Tier | Examples |
+|------|----------|
+| **Shipped in tree** | CLI, HTTP server skeleton, gRPC surfaces + interceptors, DB migrations/pool, NATS messaging packages, orchestration workflow/saga tests, discovery balancers, runtime packages (containerd/gVisor/Kata paths), benchmarks, e2e/smoke tests. |
+| **In progress** | Full production hardening, end-to-end story for every API on real clusters, complete scheduler policies, universal OPA rollout. |
+| **Planned / target** | Envoy-class gateway control plane, Temporal/Argo-class external workflow engine if adopted, Kafka for selected high-throughput streams, full SLO dashboards wired to releases. |
 
-End-to-end **workflow engine**, **service discovery**, full **gateway business APIs**, **scheduler algorithms**, **policy enforcement**, **persistent data layer**, and **NATS/Kafka** integration are **not** complete as of the documented reviews; the project is in **early implementation** with a strong specification and partial runtime/config/server code. Refer to [`agent-os/current-project-state.md`](agent-os/current-project-state.md) and [`agent-os/implementation-status-analysis.md`](agent-os/implementation-status-analysis.md).
+**Current version label:** **v0.1.0** (see `VERSION` in [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile)).
+
+---
+
+## Architecture at a glance
+
+OpenOS is described as **five logical layers** plus an explicit **thin data layer** and **dual state machines** (control vs. consistency). Diagrams render on GitHub (Mermaid).
+
+### Logical layers (north–south)
+
+```mermaid
+flowchart TB
+    subgraph IF["Interface layer"]
+        direction LR
+        GW["API entry\nREST / gRPC / WebSocket"]
+        CLI["CLI"]
+        UI["Dashboard"]
+    end
+
+    subgraph OR["Orchestration layer"]
+        direction LR
+        WE["Workflow engine"]
+        DISC["Service discovery"]
+        BUS["Event bus\nNATS-first ADR"]
+    end
+
+    subgraph AG["Agent layer"]
+        direction LR
+        RT["Agent runtime\nCRI-style"]
+        LM["Lifecycle manager"]
+        REG["Agent registry"]
+    end
+
+    subgraph PL["Platform layer"]
+        direction LR
+        SCH["Resource scheduler"]
+        SEC["Security enforcer\nOPA-class"]
+        NET["Network manager"]
+    end
+
+    subgraph CS["Core services layer"]
+        direction LR
+        STG["Storage\nPG Redis S3-class"]
+        MSG["Messaging\nNATS Kafka-class"]
+        OBS["Monitoring\nPrometheus-class"]
+    end
+
+    IF --> OR --> AG --> PL --> CS
+```
+
+### Thin data layer and persistence (east–west)
+
+```mermaid
+flowchart LR
+    subgraph APP["Application and orchestration"]
+        API["Handlers workflows"]
+    end
+
+    subgraph TDL["Thin data layer in-process"]
+        direction TB
+        REPO["Repository"]
+        UOW["Unit of Work"]
+        OB["Outbox"]
+        SCHM["Schema registry"]
+        MIG["Migrations"]
+    end
+
+    subgraph DB["Database"]
+        PG[("PostgreSQL metadata state")]
+    end
+
+    subgraph BUS["Async delivery"]
+        NATS[["NATS JetStream"]]
+    end
+
+    API --> REPO
+    API --> UOW
+    UOW --> REPO
+    UOW --> OB
+    OB --> PG
+    REPO --> PG
+    SCHM --> REPO
+    MIG --> PG
+    OB -.->|"publish"| NATS
+```
+
+### Dual paths: control plane vs consistency outbox
+
+```mermaid
+flowchart TB
+    subgraph CP["Control-plane states excerpt"]
+        direction LR
+        C1["Created"] --> C2["Scheduled"]
+        C2 --> C3["Starting"]
+        C3 --> C4["Ready"]
+        C3 --> failedNode["Failed"]
+    end
+
+    subgraph CC["Consistency outbox states"]
+        direction LR
+        S1["Persisted"] --> S2["OutboxWritten"]
+        S2 --> S3["Published"]
+        S3 --> S4["Acknowledged"]
+        S3 --> replayNode["Replay DLQ"]
+    end
+
+    C2 -.->|"persist before schedule commit"| S1
+    C4 -.->|"Ready requires Published-class state"| S3
+```
+
+---
+
+## Design principles (short)
+
+1. **API-first** — OpenAPI/gRPC-friendly contracts, unified errors, idempotency keys, `/api/v1/...` style versioning.
+2. **Agent-centric** — Schedulers and lifecycle follow agents, not interactive users.
+3. **Security by design** — Tenants, quotas, isolation (namespaces/cgroups/sandboxes) as first-class concepts.
+4. **Cloud-native** — Containers, horizontal patterns, observable by default (`trace_id`, `agent_id`, `tenant_id` in events).
+5. **Governance** — Capabilities tracked as **Target / IterationScope / Implemented** with evidence—not wishful labeling.
+
+**ADRs (examples):** in-process gateway for MVP with a path to Envoy; **NATS-first** messaging with optional JetStream. See [`agent-os/architecture/adr/`](agent-os/architecture/adr/).
+
+---
+
+## Tech stack (reference)
+
+| Layer | Technologies |
+|--------|----------------|
+| Language | **Go** 1.22+ |
+| APIs | **gRPC**, **grpc-gateway** (optional REST bridge), HTTP (`net/http` / server package) |
+| Data | **PostgreSQL** (sqlx), **Redis** client present for cache/session style configs |
+| Messaging | **NATS** (`nats.go`) |
+| Runtime | **containerd**, **gVisor**, **Kata** directions in tree |
+| Observability | Zap logging; Prometheus-style hooks in design docs |
+| CLI | **Cobra**, **Viper** |
+
+---
+
+## Quick start
+
+From the **implementation** module:
+
+```bash
+cd agent-os/implementation
+go mod download
+make build          # output: bin/aos
+```
+
+Run with the sample config (adjust DB/Redis/NATS to your environment):
+
+```bash
+./bin/aos --config configs/config.yaml
+# or: go run ./cmd/aos --config configs/config.yaml
+```
+
+**Tests:**
+
+```bash
+# Full module test (recommended for contributors)
+go test -race ./...
+
+# Makefile shortcut (pkg + internal packages)
+make test
+```
+
+Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be available; if a test fails on connection, check env-specific `test` or `e2e` packages and your local services.
+
+**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`. See [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile).
+
+---
+
+## Repository layout
+
+```text
+.
+├── README.md                 # This file
+└── agent-os/
+    ├── architecture/       # System + technical architecture, SLOs, CI gates, ADRs, compatibility matrix
+    ├── technical-design/     # API specs, deep design, database schema notes
+    ├── implementation/       # Go module: cmd/, internal/, api/, pkg/, configs/, test/
+    ├── product-vision.md     # Product definition
+    └── …                     # Planning, business, archive docs
+```
 
 ---
 
@@ -106,11 +260,33 @@ End-to-end **workflow engine**, **service discovery**, full **gateway business A
 
 | Topic | Location |
 |--------|----------|
-| System architecture | [`agent-os/architecture/system-architecture.md`](agent-os/architecture/system-architecture.md) |
+| System overview | [`agent-os/architecture/system-architecture.md`](agent-os/architecture/system-architecture.md) |
 | Detailed technical architecture | [`agent-os/architecture/tech-architecture.md`](agent-os/architecture/tech-architecture.md) |
-| Thin data layer | [`agent-os/architecture/data-layer-blueprint.md`](agent-os/architecture/data-layer-blueprint.md) |
-| Product vision | [`agent-os/product-vision.md`](agent-os/product-vision.md) |
-| Summary overview | [`agent-os/summary-overview.md`](agent-os/summary-overview.md) |
+| API compatibility (REST/gRPC/WS) | [`agent-os/architecture/api-compatibility-matrix.md`](agent-os/architecture/api-compatibility-matrix.md) |
+| SLOs and release gates | [`agent-os/architecture/slo-release-gate.md`](agent-os/architecture/slo-release-gate.md) |
+| CI data gates | [`agent-os/architecture/ci-data-gates.md`](agent-os/architecture/ci-data-gates.md) |
+| Product summary | [`agent-os/summary-overview.md`](agent-os/summary-overview.md) |
+
+---
+
+## Reliability and shipping (documented targets)
+
+SLI/SLO examples (targets, not guarantees until measured in your deployment): agent start success and latency, API error rate, outbox delivery success, event ACK latency—with **error budget** rules tying breaches to release policy. Data-related releases add migration safety, schema compatibility, and idempotency tests. See the SLO and CI gate documents linked above.
+
+---
+
+## Roadmap (high level)
+
+- Harden **production** paths: end-to-end agent lifecycle on real infrastructure, continuous SLO evidence.
+- Evolve **gateway** from in-process HTTP toward **Envoy + control plane** where justified.
+- Deepen **scheduler and policy** (resources, quotas, OPA) with audited defaults.
+- Expand **observability** (metrics/traces/logs) to match the field requirements in architecture docs.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Please run **`go test -race ./...`** (and `make lint` if you use golangci-lint) before submitting. For large behavior changes, align with an ADR or architecture note when appropriate.
 
 ---
 
