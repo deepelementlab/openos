@@ -2,7 +2,22 @@
   <img width="256" height="256" alt="二次元卡通融合logo设计 (10)" src="https://github.com/user-attachments/assets/7dd6dd0d-10cc-431e-b164-06f307a2b44a" />
 </p>
 
+<h1 align="center">OpenOS</h1>
+
+<p align="center">
+  <a href="https://github.com/deepelementlab/clawcode/releases">
+   <img
+     src="https://img.shields.io/static/v1?style=flat&label=release&labelColor=6A737D&color=fe7d37&message=v0.1.0"
+     alt="Release v0.1.0"
+   />
+  </a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-GPL%20OR%20Apache%202.0-blue.svg" alt="License: GPL-3.0" /></a>
+</p>
+
 **System goal:** realize **AOS** — an **Agent Operating System** — the layer that gives autonomous software agents the same primitives a classical OS gives processes: **lifecycle, isolation, scheduling, namespaces for tenancy, messaging, and observability**, exposed primarily through **APIs**, not GUIs.
+
+<img width="2575" height="1203" alt="Screenshot - 2026-04-13 00 02 21" src="https://github.com/user-attachments/assets/03ad3492-a5a5-49e7-b893-c6d3c4011d6b" />
+
 
 **What “AOS” means:** **AOS** abbreviates **Agent Operating System** — the architectural north star of treating **agents** as first-class units (create, schedule, run, recover, retire) with **consistent persistence and events** (for example outbox-style delivery) so behavior stays explainable under failure. **OpenOS** is the open project and codebase that implements this AOS vision.
 
