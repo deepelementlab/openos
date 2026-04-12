@@ -1,0 +1,296 @@
+syntax = "proto3";
+
+package aos.api.v1;
+
+option go_package = "github.com/agentos/aos/api/grpc/pb";
+
+import "google/protobuf/timestamp.proto";
+import "common.proto";
+
+// Agent service for managing agent lifecycle
+service AgentService {
+  // Create a new agent
+  rpc CreateAgent(CreateAgentRequest) returns (Agent);
+  
+  // Get agent by ID
+  rpc GetAgent(GetAgentRequest) returns (Agent);
+  
+  // List agents with filtering and pagination
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  
+  // Update an existing agent
+  rpc UpdateAgent(UpdateAgentRequest) returns (Agent);
+  
+  // Delete an agent
+  rpc DeleteAgent(DeleteAgentRequest) returns (Empty);
+  
+  // Start an agent
+  rpc StartAgent(StartAgentRequest) returns (AgentActionResponse);
+  
+  // Stop an agent
+  rpc StopAgent(StopAgentRequest) returns (AgentActionResponse);
+  
+  // Restart an agent
+  rpc RestartAgent(RestartAgentRequest) returns (AgentActionResponse);
+  
+  // Get agent logs
+  rpc GetAgentLogs(GetAgentLogsRequest) returns (GetAgentLogsResponse);
+  
+  // Stream agent logs (server-side streaming)
+  rpc StreamAgentLogs(StreamAgentLogsRequest) returns (stream LogEntry);
+  
+  // Get agent metrics
+  rpc GetAgentMetrics(GetAgentMetricsRequest) returns (AgentMetrics);
+  
+  // Stream agent metrics (server-side streaming)
+  rpc StreamAgentMetrics(StreamAgentMetricsRequest) returns (stream AgentMetrics);
+  
+  // Execute command in agent
+  rpc ExecuteCommand(ExecuteCommandRequest) returns (ExecuteCommandResponse);
+  
+  // Get agent events
+  rpc GetAgentEvents(GetAgentEventsRequest) returns (GetAgentEventsResponse);
+  
+  // Stream agent events (server-side streaming)
+  rpc StreamAgentEvents(StreamAgentEventsRequest) returns (stream AgentEvent);
+}
+
+// Agent represents an AI agent instance
+message Agent {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string image = 4;
+  string runtime = 5;
+  Status status = 6;
+  Resource resources = 7;
+  map<string, string> environment = 8;
+  map<string, string> labels = 9;
+  map<string, string> annotations = 10;
+  SecurityContext security_context = 11;
+  NetworkPolicy network_policy = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  string created_by = 15;
+  string node_id = 16;  // Node where agent is running
+}
+
+// Security context for agent execution
+message SecurityContext {
+  int64 run_as_user = 1;
+  int64 run_as_group = 2;
+  bool read_only_root_fs = 3;
+  bool allow_privilege_escalation = 4;
+  string sandbox_type = 5;  // "gvisor", "kata", "containerd"
+  string seccomp_profile = 6;
+  repeated string capabilities_add = 7;
+  repeated string capabilities_drop = 8;
+}
+
+// Network policy for agent
+message NetworkPolicy {
+  bool allow_inbound = 1;
+  bool allow_outbound = 2;
+  repeated int32 inbound_ports = 3;
+  repeated string outbound_hosts = 4;
+  string ingress_class = 5;
+}
+
+// Create agent request
+message CreateAgentRequest {
+  string name = 1;
+  string image = 2;
+  string runtime = 3;
+  Resource resources = 4;
+  map<string, string> environment = 5;
+  map<string, string> labels = 6;
+  map<string, string> annotations = 7;
+  SecurityContext security_context = 8;
+  NetworkPolicy network_policy = 9;
+  int32 priority = 10;  // Scheduling priority
+}
+
+// Get agent request
+message GetAgentRequest {
+  string agent_id = 1;
+}
+
+// List agents request
+message ListAgentsRequest {
+  PaginationRequest pagination = 1;
+  string status = 2;  // Filter by status
+  map<string, string> labels = 3;  // Filter by labels
+  string runtime = 4;  // Filter by runtime
+  string sort_by = 5;  // Sort field
+  SortOrder sort_order = 6;
+}
+
+// List agents response
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+  PaginationResponse pagination = 2;
+}
+
+// Update agent request
+message UpdateAgentRequest {
+  string agent_id = 1;
+  string name = 2;
+  string image = 3;
+  string runtime = 4;
+  Resource resources = 5;
+  map<string, string> environment = 6;
+  map<string, string> labels = 7;
+  map<string, string> annotations = 8;
+  SecurityContext security_context = 9;
+  NetworkPolicy network_policy = 10;
+}
+
+// Delete agent request
+message DeleteAgentRequest {
+  string agent_id = 1;
+  bool force = 2;  // Force delete even if running
+}
+
+// Start agent request
+message StartAgentRequest {
+  string agent_id = 1;
+  bool wait = 2;  // Wait for agent to be running
+  int32 timeout_seconds = 3;  // Timeout for wait
+}
+
+// Stop agent request
+message StopAgentRequest {
+  string agent_id = 1;
+  bool graceful = 2;  // Try graceful shutdown first
+  int32 timeout_seconds = 3;
+}
+
+// Restart agent request
+message RestartAgentRequest {
+  string agent_id = 1;
+  bool graceful = 2;
+  int32 timeout_seconds = 3;
+}
+
+// Agent action response
+message AgentActionResponse {
+  string agent_id = 1;
+  string action = 2;  // "start", "stop", "restart"
+  Status old_status = 3;
+  Status new_status = 4;
+  google.protobuf.Timestamp started_at = 5;
+  string message = 6;
+}
+
+// Get agent logs request
+message GetAgentLogsRequest {
+  string agent_id = 1;
+  int32 tail = 2;  // Number of lines from end
+  string since = 3;  // Duration (e.g., "1h", "30m")
+  bool timestamps = 4;  // Include timestamps
+}
+
+// Get agent logs response
+message GetAgentLogsResponse {
+  string agent_id = 1;
+  repeated LogEntry entries = 2;
+}
+
+// Log entry
+message LogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string source = 2;  // "stdout", "stderr", "system"
+  string level = 3;   // "info", "warn", "error", "debug"
+  string message = 4;
+  map<string, string> metadata = 5;
+}
+
+// Stream agent logs request
+message StreamAgentLogsRequest {
+  string agent_id = 1;
+  bool follow = 2;  // Follow new logs
+  string since = 3;
+  bool timestamps = 4;
+}
+
+// Get agent metrics request
+message GetAgentMetricsRequest {
+  string agent_id = 1;
+  string time_range = 2;  // "1h", "24h", "7d"
+}
+
+// Agent metrics
+message AgentMetrics {
+  string agent_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  double cpu_usage_percent = 3;
+  double memory_usage_percent = 4;
+  int64 memory_usage_bytes = 5;
+  int64 network_rx_bytes = 6;
+  int64 network_tx_bytes = 7;
+  int64 disk_read_bytes = 8;
+  int64 disk_write_bytes = 9;
+  int64 uptime_seconds = 10;
+  int32 restart_count = 11;
+  double response_time_p95 = 12;
+  double response_time_p99 = 13;
+  double error_rate = 14;
+  int64 requests_total = 15;
+}
+
+// Stream agent metrics request
+message StreamAgentMetricsRequest {
+  string agent_id = 1;
+  int32 interval_seconds = 2;  // Sampling interval
+}
+
+// Execute command request
+message ExecuteCommandRequest {
+  string agent_id = 1;
+  repeated string command = 2;  // Command and arguments
+  map<string, string> environment = 3;
+  string working_dir = 4;
+  int32 timeout_seconds = 5;
+  bool tty = 6;
+}
+
+// Execute command response
+message ExecuteCommandResponse {
+  string agent_id = 1;
+  int32 exit_code = 2;
+  string stdout = 3;
+  string stderr = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp finished_at = 6;
+}
+
+// Agent event
+message AgentEvent {
+  string event_id = 1;
+  string agent_id = 2;
+  string event_type = 3;  // "created", "started", "stopped", "error", etc.
+  Status status = 4;
+  string message = 5;
+  map<string, string> metadata = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+// Get agent events request
+message GetAgentEventsRequest {
+  string agent_id = 1;
+  int32 limit = 2;
+  string since = 3;
+  repeated string event_types = 4;
+}
+
+// Get agent events response
+message GetAgentEventsResponse {
+  string agent_id = 1;
+  repeated AgentEvent events = 2;
+}
+
+// Stream agent events request
+message StreamAgentEventsRequest {
+  string agent_id = 1;
+  repeated string event_types = 2;
+}

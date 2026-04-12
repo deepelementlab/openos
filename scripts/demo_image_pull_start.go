@@ -15,7 +15,7 @@ import (
 func main() {
 	fmt.Println("=== Agent OS Image Pull and Start Demo ===")
 	fmt.Println("This demonstrates the complete workflow of pulling an agent image")
-	fmt.Println("and starting an agent container using the containerd runtime.\n")
+	fmt.Println("and starting an agent container using the containerd runtime.")
 
 	// Check if containerd socket exists
 	socketPath := "/run/containerd/containerd.sock"
@@ -139,12 +139,8 @@ func main() {
 	} else {
 		fmt.Printf("   ✓ Statistics retrieved\n")
 		fmt.Printf("   Timestamp: %s\n", stats.Timestamp.Format(time.RFC3339))
-		if stats.CPU != nil {
-			fmt.Printf("   CPU Usage: %.2f\n", stats.CPU.Usage)
-		}
-		if stats.Memory != nil {
-			fmt.Printf("   Memory Usage: %d bytes\n", stats.Memory.Usage)
-		}
+		fmt.Printf("   CPU Usage: %d ns\n", stats.CPUUsage)
+		fmt.Printf("   Memory Usage: %d bytes\n", stats.MemoryUsage)
 	}
 
 	// Demo: List all agents

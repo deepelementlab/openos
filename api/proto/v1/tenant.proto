@@ -1,0 +1,258 @@
+syntax = "proto3";
+
+package aos.api.v1;
+
+option go_package = "github.com/agentos/aos/api/grpc/pb";
+
+import "google/protobuf/timestamp.proto";
+import "common.proto";
+
+// Tenant service for managing multi-tenancy
+service TenantService {
+  // Create a new tenant
+  rpc CreateTenant(CreateTenantRequest) returns (Tenant);
+  
+  // Get tenant by ID
+  rpc GetTenant(GetTenantRequest) returns (Tenant);
+  
+  // List all tenants (admin only)
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  
+  // Update tenant
+  rpc UpdateTenant(UpdateTenantRequest) returns (Tenant);
+  
+  // Delete tenant
+  rpc DeleteTenant(DeleteTenantRequest) returns (Empty);
+  
+  // Get tenant quota
+  rpc GetTenantQuota(GetTenantQuotaRequest) returns (TenantQuota);
+  
+  // Update tenant quota
+  rpc UpdateTenantQuota(UpdateTenantQuotaRequest) returns (TenantQuota);
+  
+  // Get tenant resource usage
+  rpc GetTenantUsage(GetTenantUsageRequest) returns (TenantUsage);
+  
+  // Add member to tenant
+  rpc AddTenantMember(AddTenantMemberRequest) returns (TenantMember);
+  
+  // Remove member from tenant
+  rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (Empty);
+  
+  // List tenant members
+  rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
+  
+  // Update member role
+  rpc UpdateTenantMember(UpdateTenantMemberRequest) returns (TenantMember);
+  
+  // Suspend tenant
+  rpc SuspendTenant(SuspendTenantRequest) returns (Tenant);
+  
+  // Activate tenant
+  rpc ActivateTenant(ActivateTenantRequest) returns (Tenant);
+  
+  // Get tenant statistics
+  rpc GetTenantStats(GetTenantStatsRequest) returns (TenantStats);
+}
+
+// Tenant represents a tenant in the system
+message Tenant {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  TenantStatus status = 4;
+  string plan = 5;  // Subscription plan
+  ResourceQuota quota = 6;
+  map<string, string> labels = 7;
+  map<string, string> metadata = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  google.protobuf.Timestamp suspended_at = 11;
+  string suspended_reason = 12;
+}
+
+// Tenant status
+enum TenantStatus {
+  TENANT_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  SUSPENDED = 2;
+  PENDING = 3;
+  DEACTIVATED = 4;
+}
+
+// Tenant quota details
+message TenantQuota {
+  string tenant_id = 1;
+  ResourceQuota allowed = 2;
+  ResourceUsage used = 3;
+  double usage_percent = 4;  // Overall usage percentage
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// Tenant usage information
+message TenantUsage {
+  string tenant_id = 1;
+  ResourceUsage resources = 2;
+  int32 total_agents = 3;
+  int32 running_agents = 4;
+  int32 stopped_agents = 5;
+  int32 error_agents = 6;
+  int64 total_requests = 7;
+  double avg_response_time = 8;
+  double error_rate = 9;
+  google.protobuf.Timestamp period_start = 10;
+  google.protobuf.Timestamp period_end = 11;
+}
+
+// Tenant member
+message TenantMember {
+  string tenant_id = 1;
+  string user_id = 2;
+  string email = 3;
+  string name = 4;
+  MemberRole role = 5;
+  google.protobuf.Timestamp joined_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  string invited_by = 8;
+}
+
+// Member role
+enum MemberRole {
+  MEMBER_ROLE_UNSPECIFIED = 0;
+  OWNER = 1;
+  ADMIN = 2;
+  MEMBER = 3;
+  VIEWER = 4;
+}
+
+// Create tenant request
+message CreateTenantRequest {
+  string name = 1;
+  string description = 2;
+  string plan = 3;
+  ResourceQuota quota = 4;
+  map<string, string> labels = 5;
+  map<string, string> metadata = 6;
+  string owner_email = 7;  // Email of the tenant owner
+}
+
+// Get tenant request
+message GetTenantRequest {
+  string tenant_id = 1;
+}
+
+// List tenants request
+message ListTenantsRequest {
+  PaginationRequest pagination = 1;
+  TenantStatus status = 2;  // Filter by status
+  string plan = 3;  // Filter by plan
+  string sort_by = 4;
+  SortOrder sort_order = 5;
+}
+
+// List tenants response
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+  PaginationResponse pagination = 2;
+}
+
+// Update tenant request
+message UpdateTenantRequest {
+  string tenant_id = 1;
+  string name = 2;
+  string description = 3;
+  string plan = 4;
+  map<string, string> labels = 5;
+  map<string, string> metadata = 6;
+}
+
+// Delete tenant request
+message DeleteTenantRequest {
+  string tenant_id = 1;
+  bool force = 2;  // Force delete even if has resources
+  bool cascade = 3;  // Delete all tenant resources
+}
+
+// Get tenant quota request
+message GetTenantQuotaRequest {
+  string tenant_id = 1;
+}
+
+// Update tenant quota request
+message UpdateTenantQuotaRequest {
+  string tenant_id = 1;
+  ResourceQuota quota = 2;
+  string reason = 3;  // Reason for quota change
+}
+
+// Get tenant usage request
+message GetTenantUsageRequest {
+  string tenant_id = 1;
+  string period = 2;  // "current", "last_24h", "last_7d", "last_30d"
+}
+
+// Add tenant member request
+message AddTenantMemberRequest {
+  string tenant_id = 1;
+  string email = 2;  // Email of user to invite
+  MemberRole role = 3;
+}
+
+// Remove tenant member request
+message RemoveTenantMemberRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+// List tenant members request
+message ListTenantMembersRequest {
+  string tenant_id = 1;
+  PaginationRequest pagination = 2;
+  MemberRole role = 3;  // Filter by role
+}
+
+// List tenant members response
+message ListTenantMembersResponse {
+  string tenant_id = 1;
+  repeated TenantMember members = 2;
+  PaginationResponse pagination = 3;
+}
+
+// Update tenant member request
+message UpdateTenantMemberRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  MemberRole role = 3;
+}
+
+// Suspend tenant request
+message SuspendTenantRequest {
+  string tenant_id = 1;
+  string reason = 2;
+  bool immediate = 3;  // Suspend immediately vs graceful
+}
+
+// Activate tenant request
+message ActivateTenantRequest {
+  string tenant_id = 1;
+  string reason = 2;
+}
+
+// Get tenant stats request
+message GetTenantStatsRequest {
+  string tenant_id = 1;
+  string period = 2;  // "24h", "7d", "30d"
+}
+
+// Tenant statistics
+message TenantStats {
+  string tenant_id = 1;
+  string period = 2;
+  int32 total_agents_created = 3;
+  int32 total_agents_deleted = 4;
+  int64 total_executions = 5;
+  double avg_execution_time = 6;
+  double success_rate = 7;
+  map<string, int64> api_calls = 8;  // API endpoint -> call count
+  map<string, double> resource_hours = 9;  // Resource -> hours used
+}

@@ -98,6 +98,54 @@ api:
   enable_caching: true
   cache_duration: 300  # seconds
 
+# gRPC Configuration
+grpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 9090
+  tls_enabled: false
+  cert_file: ""
+  key_file: ""
+  max_connection_idle: 600  # seconds
+  max_connection_age: 3600  # seconds
+  max_connection_age_grace: 300  # seconds
+  keepalive_time: 30  # seconds
+  keepalive_timeout: 20  # seconds
+  
+  # Interceptor Configuration
+  interceptors:
+    recovery_enabled: true
+    logging_enabled: true
+    auth_enabled: true
+    tenant_enabled: true
+    quota_enabled: true
+    metrics_enabled: true
+
+# Multi-tenant Configuration
+tenant:
+  enabled: true  # Enable multi-tenancy (previously features.multi_tenant)
+  isolated_namespaces: false  # Use namespace isolation (advanced)
+  strict_mode: true  # Require tenant ID for all operations
+  default_quota:
+    max_agents: 5
+    max_cpu_cores: 4
+    max_memory_gb: 8
+    max_storage_gb: 50
+    max_gpu: 0
+    max_requests_per_min: 100
+  
+  # Quota enforcement
+  quota_enforcement:
+    enabled: true
+    check_interval: 60  # seconds
+    hard_limits: true  # Enforce hard limits vs soft warnings
+    
+  # Tenant isolation
+  isolation:
+    data_isolation: true  # Separate data per tenant
+    network_isolation: false  # Network policies between tenants
+    resource_isolation: false  # Resource quotas enforcement
+
 # Cluster Configuration (for future multi-node support)
 cluster:
   enabled: false
@@ -129,8 +177,8 @@ network:
 
 # Feature Flags
 features:
-  multi_tenant: false
+  multi_tenant: true  # DEPRECATED: Use 'tenant.enabled' instead
   gpu_support: false
   edge_mode: false
   backup_enabled: false
-  audit_logging: false
+  audit_logging: true  # Enable audit logging for compliance

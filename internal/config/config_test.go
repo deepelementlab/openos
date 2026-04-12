@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,7 +83,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 
 	_, err = LoadConfig(configFile)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to unmarshal config")
+	assert.Contains(t, err.Error(), "failed to read config file")
 }
 
 func TestDefaultConfig(t *testing.T) {

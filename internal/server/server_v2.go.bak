@@ -1,0 +1,359 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/agentos/aos/api/middleware"
+	"github.com/agentos/aos/internal/config"
+	"github.com/agentos/aos/internal/database"
+	"github.com/agentos/aos/internal/data/outbox"
+	"github.com/agentos/aos/internal/data/repository"
+	"github.com/agentos/aos/internal/data/transaction"
+	"github.com/agentos/aos/internal/health"
+	"github.com/agentos/aos/internal/monitoring"
+	"github.com/agentos/aos/internal/scheduler"
+	"github.com/agentos/aos/internal/version"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+)
+
+// Server represents the Agent OS HTTP server.
+type Server struct {
+	config        *config.Config
+	logger        *zap.Logger
+	server        *http.Server
+	metrics       *monitoring.Metrics
+	healthChecker *health.Checker
+	scheduler     scheduler.Scheduler
+	agentRepo     repository.AgentRepository
+	uow           transaction.UnitOfWork
+	outbox        outbox.Publisher
+	healthStatus  string
+	startTime     time.Time
+}
+
+// NewServer creates a new server instance.
+func NewServer(cfg *config.Config, logger *zap.Logger) (*Server, error) {
+	agentRepo := repository.AgentRepository(repository.NewInMemoryAgentRepository())
+	unitOfWork := transaction.UnitOfWork(transaction.NewNoopUnitOfWork())
+	outboxPublisher := outbox.Publisher(outbox.NewInMemoryPublisher())
+	if dbRepo, dbUoW, dbOutbox, err := initPostgresDataComponents(cfg, logger); err == nil {
+		agentRepo = dbRepo
+		unitOfWork = dbUoW
+		outboxPublisher = dbOutbox
+		logger.Info("using PostgreSQL data components (repo+uow+outbox)")
+	} else {
+		logger.Warn("falling back to in-memory data components", zap.Error(err))
+	}
+
+	checker := health.NewChecker()
+	checker.Register("server", "HTTP server", func(_ context.Context) error { return nil })
+
+	sched := scheduler.NewDefaultScheduler()
+	_ = sched.AddNode(context.Background(), scheduler.NodeState{
+		NodeID:      "node-local-1",
+		NodeName:    "local",
+		CPUCores:    4,
+		MemoryBytes: 8 * 1024 * 1024 * 1024,
+		Health:      "healthy",
+	})
+
+	s := &Server{
+		config:        cfg,
+		logger:        logger,
+		healthChecker: checker,
+		scheduler:     sched,
+		agentRepo:     agentRepo,
+		uow:           unitOfWork,
+		outbox:        outboxPublisher,
+		healthStatus:  "healthy",
+		startTime:     time.Now(),
+	}
+
+	// Initialize metrics
+	metrics, err := monitoring.NewMetrics(&cfg.Monitoring)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
+	}
+	s.metrics = metrics
+
+	// Create HTTP server with middleware chain
+	mux := http.NewServeMux()
+	s.setupRoutes(mux)
+
+	var handler http.Handler = mux
+
+	// Wrap with logging middleware (always enabled)
+	loggingMw := middleware.NewLoggingMiddleware(logger)
+	handler = loggingMw.Handler(handler)
+
+	s.server = &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	return s, nil
+}
+
+// setupRoutes configures all HTTP routes including lifecycle operations.
+func (s *Server) setupRoutes(mux *http.ServeMux) {
+	// Health endpoints
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReady)
+	mux.HandleFunc("/live", s.handleLive)
+
+	// Agent collection endpoints
+	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.listAgents(w, r)
+		case http.MethodPost:
+			s.createAgent(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	// Agent instance + lifecycle endpoints (handles /start, /stop, /restart)
+	mux.HandleFunc("/api/v1/agents/", s.handleAgentRoutes)
+
+	// Monitoring endpoints
+	mux.HandleFunc("/metrics", s.handleMetrics)
+
+	// Root endpoint
+	mux.HandleFunc("/", s.handleRoot)
+}
+
+// StartServer starts the HTTP server.
+func (s *Server) StartServer(ctx context.Context) error {
+	s.logger.Info("Starting server",
+		zap.String("address", s.server.Addr),
+		zap.String("mode", s.config.Server.Mode),
+	)
+
+	go func() {
+		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.logger.Error("Server error", zap.Error(err))
+		}
+	}()
+
+	// Wait for context cancellation
+	<-ctx.Done()
+	return nil
+}
+
+// Shutdown gracefully shuts down the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.logger.Info("Shutting down server...")
+	s.healthStatus = "shutting_down"
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, s.config.Server.GracefulShutdownTimeout)
+	defer cancel()
+
+	if err := s.server.Shutdown(shutdownCtx); err != nil {
+		s.logger.Error("Graceful shutdown failed", zap.Error(err))
+		return fmt.Errorf("graceful shutdown failed: %w", err)
+	}
+
+	s.healthStatus = "stopped"
+	s.logger.Info("Server shutdown complete")
+	return nil
+}
+
+// handleHealth handles health check requests.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.healthChecker.Check(r.Context())
+	checkerStatus := s.healthChecker.Status()
+	checkerStatus["version"] = version.GetVersion()
+	checkerStatus["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, checkerStatus)
+}
+
+// handleReady handles readiness probe requests.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// handleLive handles liveness probe requests.
+func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// handleMetrics handles metrics requests.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(s.metrics.GetMetrics()))
+}
+
+// handleRoot handles the root endpoint.
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	info := map[string]interface{}{
+		"name":        "Agent OS",
+		"version":     version.GetVersion(),
+		"description": "Operating System for AI Agents",
+		"endpoints": map[string]string{
+			"health":        "/health",
+			"ready":         "/ready",
+			"live":          "/live",
+			"metrics":       "/metrics",
+			"agents":        "/api/v1/agents",
+			"agent_actions": "/api/v1/agents/{id}/start|stop|restart",
+		},
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, info)
+}
+
+// listAgents lists all agents with basic pagination.
+func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := s.agentRepo.List(r.Context())
+	if err != nil {
+		s.logger.Error("failed to list agents", zap.Error(err))
+		s.metrics.IncAPIError(http.MethodGet, "/api/v1/agents", "list_failed")
+		http.Error(w, "failed to list agents", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+		"data":    agents,
+		"pagination": map[string]interface{}{
+			"page":  1,
+			"limit": 20,
+			"total": len(agents),
+		},
+	}
+
+	s.metrics.IncAPIRequest(http.MethodGet, "/api/v1/agents", http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, response)
+}
+
+// createAgent creates a new agent with scheduling.
+func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
+	createStart := time.Now()
+	type createAgentRequest struct {
+		Name        string            `json:"name"`
+		Image       string            `json:"image"`
+		Runtime     string            `json:"runtime,omitempty"`
+		Resources   map[string]string `json:"resources,omitempty"`
+		Environment map[string]string `json:"environment,omitempty"`
+		Labels      map[string]string `json:"labels,omitempty"`
+	}
+	var req createAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/agents", "bad_request")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Image) == "" {
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/agents", "validation_failed")
+		http.Error(w, "name and image are required", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	id := "agent-" + uuid.NewString()
+	eventID := "evt-" + uuid.NewString()
+
+	agent := &repository.Agent{
+		ID:      id,
+		Name:    req.Name,
+		Image:   req.Image,
+		Runtime: req.Runtime,
+		Resources: req.Resources,
+		Status:  repository.AgentStatusPending,
+		Metadata: map[string]interface{}{
+			"environment": req.Environment,
+			"labels":      req.Labels,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.uow.Do(r.Context(), func(ctx context.Context) error {
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			return err
+		}
+		return s.outbox.Publish(ctx, outbox.Event{
+			ID:        eventID,
+			Type:      "agent.created",
+			Payload:   map[string]interface{}{"agent_id": id, "name": req.Name},
+			Status:    outbox.EventStatusPending,
+			CreatedAt: now,
+		})
+	}); err != nil {
+		s.logger.Error("failed to create agent", zap.Error(err))
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/agents", "create_failed")
+		http.Error(w, "failed to create agent", http.StatusInternalServerError)
+		return
+	}
+
+	// Attempt scheduling
+	if nodeID, err := s.scheduleAgentBaseline(r.Context(), id); err == nil {
+		agent.Metadata["scheduled_node"] = nodeID
+		agent.Status = repository.AgentStatusCreating
+		agent.UpdatedAt = time.Now().UTC()
+		_ = s.agentRepo.Update(r.Context(), agent)
+	} else {
+		_ = s.outbox.DeadLetter(r.Context(), eventID)
+		s.logger.Warn("baseline scheduling failed", zap.Error(err), zap.String("agent_id", id))
+	}
+
+	s.metrics.IncAgentCreated()
+	s.metrics.ObserveAgentCreationDuration(time.Since(createStart).Seconds())
+	s.metrics.IncAPIRequest(http.MethodPost, "/api/v1/agents", http.StatusCreated)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", "/api/v1/agents/"+id)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    agent,
+	})
+}
+
+// writeJSON writes a JSON response.
+func writeJSON(w http.ResponseWriter, data interface{}) error {
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(data)
+}

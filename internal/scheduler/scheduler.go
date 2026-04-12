@@ -25,19 +25,49 @@ type Scheduler interface {
 
 // NodeState describes a scheduling node's resource state.
 type NodeState struct {
-	NodeID      string    `json:"node_id"`
-	NodeName    string    `json:"node_name"`
-	Address     string    `json:"address"`
-	CPUUsage    float64   `json:"cpu_usage"`
-	MemoryUsage float64   `json:"memory_usage"`
-	DiskUsage   float64   `json:"disk_usage"`
-	CPUCores    int       `json:"cpu_cores"`
-	MemoryBytes int64     `json:"memory_bytes"`
-	DiskBytes   int64     `json:"disk_bytes"`
-	AgentCount  int       `json:"agent_count"`
-	Health      string    `json:"health"`
-	LastUpdate  time.Time `json:"last_update"`
+	NodeID       string            `json:"node_id"`
+	NodeName     string            `json:"node_name"`
+	Address      string            `json:"address"`
+	CPUUsage     float64           `json:"cpu_usage"`
+	MemoryUsage  float64           `json:"memory_usage"`
+	DiskUsage    float64           `json:"disk_usage"`
+	CPUCores     int               `json:"cpu_cores"`
+	MemoryBytes  int64             `json:"memory_bytes"`
+	DiskBytes    int64             `json:"disk_bytes"`
+	GPUCount     int               `json:"gpu_count"`
+	AgentCount   int               `json:"agent_count"`
+	Health       string            `json:"health"`
+	LastUpdate   time.Time         `json:"last_update"`
+	// Extended fields for advanced algorithms
+	CPUUsed      int               `json:"cpu_used"`
+	MemoryUsed   int64             `json:"memory_used"`
+	DiskUsed     int64             `json:"disk_used"`
+	RunningAgents []AgentInfo      `json:"running_agents,omitempty"`
+	Agents       []AgentInfo       `json:"agents,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CostPerHour  float64           `json:"cost_per_hour"`
+	IsSpot       bool              `json:"is_spot"`
+	MigrationsIn int               `json:"migrations_in"`
+	MigrationsOut int              `json:"migrations_out"`
 }
+
+// AgentInfo represents basic agent information on a node.
+type AgentInfo struct {
+	ID string `json:"id"`
+}
+
+// AgentSpec defines the resource requirements for an agent.
+type AgentSpec struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	CPURequest    int               `json:"cpu_request"`
+	MemoryRequest int64             `json:"memory_request"`
+	DiskRequest   int64             `json:"disk_request"`
+	Labels        map[string]string `json:"labels,omitempty"`
+}
+
+// ErrNoAvailableNodes is returned when no nodes are available for scheduling.
+var ErrNoAvailableNodes = fmt.Errorf("no available nodes for scheduling")
 
 // TaskRequest describes what needs to be scheduled.
 type TaskRequest struct {
@@ -47,6 +77,7 @@ type TaskRequest struct {
 	CPURequest    float64  `json:"cpu_request"`
 	MemoryRequest int64    `json:"memory_request"`
 	DiskRequest   int64    `json:"disk_request"`
+	GPURequest    int      `json:"gpu_request"`
 	Priority      int      `json:"priority"`
 	Affinity      []string `json:"affinity,omitempty"`
 	AntiAffinity  []string `json:"anti_affinity,omitempty"`

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"strings"
 
 	agenthandler "github.com/agentos/aos/api/handlers/agent"
 	monitoringhandler "github.com/agentos/aos/api/handlers/monitoring"
@@ -23,8 +24,9 @@ func RegisterRoutes(mux *http.ServeMux, h Handlers) {
 		mux.HandleFunc("/metrics", methodGet(h.Monitoring.Metrics))
 	}
 
-	// Agent CRUD
+	// Agent CRUD and lifecycle operations
 	if h.Agent != nil {
+		// List and Create agents
 		mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodGet:
@@ -36,7 +38,37 @@ func RegisterRoutes(mux *http.ServeMux, h Handlers) {
 			}
 		})
 
+		// Agent operations by ID
 		mux.HandleFunc("/api/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			
+			// Handle action endpoints
+			if strings.HasSuffix(path, "/start") {
+				if r.Method == http.MethodPost {
+					h.Agent.Start(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+			if strings.HasSuffix(path, "/stop") {
+				if r.Method == http.MethodPost {
+					h.Agent.Stop(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+			if strings.HasSuffix(path, "/restart") {
+				if r.Method == http.MethodPost {
+					h.Agent.Restart(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
+			
+			// Handle regular CRUD operations
 			switch r.Method {
 			case http.MethodGet:
 				h.Agent.Get(w, r)

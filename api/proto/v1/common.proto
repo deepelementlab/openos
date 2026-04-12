@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package aos.api.v1;
+
+option go_package = "github.com/agentos/aos/api/grpc/pb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// Common message types used across all services
+
+// Empty response for operations that don't return data
+message Empty {
+}
+
+// Pagination request parameters
+message PaginationRequest {
+  int32 page = 1;      // Page number (1-based)
+  int32 page_size = 2; // Items per page (default: 20, max: 100)
+}
+
+// Pagination response metadata
+message PaginationResponse {
+  int32 page = 1;       // Current page number
+  int32 page_size = 2;  // Items per page
+  int32 total = 3;      // Total number of items
+  int32 pages = 4;      // Total number of pages
+}
+
+// Sort order for list operations
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  ASC = 1;  // Ascending order
+  DESC = 2; // Descending order
+}
+
+// Resource represents a resource requirement
+message Resource {
+  string cpu = 1;     // CPU cores or millicores (e.g., "500m", "2")
+  string memory = 2;  // Memory (e.g., "512Mi", "1Gi")
+  string storage = 3; // Storage (e.g., "10Gi")
+  string gpu = 4;     // GPU count (e.g., "1", "2")
+}
+
+// Label represents a key-value label
+message Label {
+  string key = 1;
+  string value = 2;
+}
+
+// Error detail for rich error responses
+message ErrorDetail {
+  string field = 1;   // Field that caused the error
+  string message = 2; // Error message
+  string code = 3;    // Error code
+}
+
+// Standard error response
+message ErrorResponse {
+  string code = 1;           // Error code
+  string message = 2;        // Human-readable error message
+  repeated ErrorDetail details = 3; // Detailed error information
+}
+
+// Status represents the status of a resource
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  CREATING = 2;
+  RUNNING = 3;
+  STOPPING = 4;
+  STOPPED = 5;
+  ERROR = 6;
+  DELETING = 7;
+  DELETED = 8;
+}
+
+// Tenant context information
+message TenantContext {
+  string tenant_id = 1;   // Tenant ID
+  string user_id = 2;     // User ID making the request
+  repeated string roles = 3; // User roles in the tenant
+}
+
+// Audit information for tracking changes
+message AuditInfo {
+  string created_by = 1;
+  string updated_by = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// Resource quota definition
+message ResourceQuota {
+  int32 max_agents = 1;     // Maximum number of agents
+  int32 max_cpu_cores = 2;  // Maximum CPU cores
+  int32 max_memory_gb = 3;  // Maximum memory in GB
+  int32 max_storage_gb = 4; // Maximum storage in GB
+  int32 max_gpu = 5;        // Maximum GPU count
+  int32 max_requests_per_min = 6; // Rate limit: requests per minute
+}
+
+// Current resource usage
+message ResourceUsage {
+  int32 agents_count = 1;
+  int32 cpu_cores_used = 2;
+  int32 memory_gb_used = 3;
+  int32 storage_gb_used = 4;
+  int32 gpu_used = 5;
+}

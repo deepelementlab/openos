@@ -85,6 +85,9 @@ func (r *ContainerdRuntime) CreateAgent(ctx context.Context, spec *types.AgentSp
 	if spec.Image == "" {
 		return nil, fmt.Errorf("agent image is required")
 	}
+	if r.client == nil {
+		return nil, fmt.Errorf("containerd client not initialized")
+	}
 
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
@@ -140,6 +143,9 @@ func (r *ContainerdRuntime) StartAgent(ctx context.Context, agentID string) erro
 	if agentID == "" {
 		return fmt.Errorf("agent ID is required")
 	}
+	if r.client == nil {
+		return fmt.Errorf("containerd client not initialized")
+	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
 	container, err := r.client.LoadContainer(ctx, agentID)
@@ -164,6 +170,9 @@ func (r *ContainerdRuntime) StopAgent(ctx context.Context, agentID string, timeo
 	}
 	if timeout <= 0 {
 		timeout = 30 * time.Second
+	}
+	if r.client == nil {
+		return fmt.Errorf("containerd client not initialized")
 	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
@@ -199,6 +208,9 @@ func (r *ContainerdRuntime) DeleteAgent(ctx context.Context, agentID string) err
 	if agentID == "" {
 		return fmt.Errorf("agent ID is required")
 	}
+	if r.client == nil {
+		return fmt.Errorf("containerd client not initialized")
+	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
 	container, err := r.client.LoadContainer(ctx, agentID)
@@ -225,6 +237,9 @@ func (r *ContainerdRuntime) DeleteAgent(ctx context.Context, agentID string) err
 func (r *ContainerdRuntime) GetAgent(ctx context.Context, agentID string) (*types.Agent, error) {
 	if agentID == "" {
 		return nil, fmt.Errorf("agent ID is required")
+	}
+	if r.client == nil {
+		return nil, fmt.Errorf("containerd client not initialized")
 	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
@@ -267,6 +282,9 @@ func (r *ContainerdRuntime) GetAgent(ctx context.Context, agentID string) (*type
 }
 
 func (r *ContainerdRuntime) ListAgents(ctx context.Context, _ *types.AgentFilter) ([]*types.Agent, error) {
+	if r.client == nil {
+		return nil, fmt.Errorf("containerd client not initialized")
+	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
 	ctrs, err := r.client.Containers(ctx)
@@ -291,6 +309,9 @@ func (r *ContainerdRuntime) ExecuteCommand(ctx context.Context, agentID string, 
 	}
 	if cmd == nil {
 		return nil, fmt.Errorf("command is required")
+	}
+	if r.client == nil {
+		return nil, fmt.Errorf("containerd client not initialized")
 	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 
@@ -351,6 +372,9 @@ func (r *ContainerdRuntime) GetAgentLogs(_ context.Context, agentID string, _ *t
 func (r *ContainerdRuntime) GetAgentStats(ctx context.Context, agentID string) (*types.ResourceStats, error) {
 	if agentID == "" {
 		return nil, fmt.Errorf("agent ID is required")
+	}
+	if r.client == nil {
+		return nil, fmt.Errorf("containerd client not initialized")
 	}
 	ctx = namespaces.WithNamespace(ctx, defaultNamespace)
 

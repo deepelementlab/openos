@@ -1,0 +1,134 @@
+# ==============================================================================
+# Production Dockerfile for AgentOS
+# Multi-stage build with security optimizations
+# ==============================================================================
+
+# Build stage: Use specific Go version with security updates
+FROM golang:1.22-alpine AS builder
+
+# Set environment variables for Go
+ENV GO111MODULE=on \
+    CGO_ENABLED=0 \
+    GOPROXY=https://goproxy.cn,direct \
+    GOPRIVATE=*.github.com
+
+# Install build dependencies (minimal)
+RUN apk add --no-cache \
+    git \
+    ca-certificates \
+    tzdata \
+    make \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user for builder
+RUN addgroup -g 1000 -S builder && \
+    adduser -u 1000 -S builder -G builder
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy only dependency files first (for better caching)
+COPY go.mod go.sum ./
+
+# Download dependencies with checksum verification
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Run security checks and tests
+RUN go vet ./... && \
+    go test -short ./...
+
+# Build the application with security flags
+RUN GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-w -s \
+        -X main.Version=${VERSION:-unknown} \
+        -X main.Commit=${COMMIT:-unknown} \
+        -X main.BuildTime=${BUILD_TIME:-unknown}" \
+    -buildvcs=true \
+    -o /app/aos ./cmd/aos
+
+# Security scanning stage
+FROM aquasec/trivy:0.49.1 AS scanner
+COPY --from=builder /app/aos /scan/
+RUN trivy filesystem --security-checks vuln,config,secret --no-progress --exit-code 0 /scan/
+
+# Final stage: Use distroless base for minimal attack surface
+FROM gcr.io/distroless/static:nonroot AS production
+
+# Copy CA certificates
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy binary from builder
+COPY --from=builder /app/aos /usr/local/bin/aos
+
+# Create necessary directories
+USER nonroot:nonroot
+
+# Set environment variables
+ENV PATH="/usr/local/bin:${PATH}" \
+    AOS_CONFIG_PATH="/app/configs/config.yaml"
+
+# Expose default ports
+EXPOSE 8080 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["/usr/local/bin/aos", "health"]
+
+# Entrypoint
+ENTRYPOINT ["/usr/local/bin/aos"]
+
+# Default command
+CMD ["--config", "/app/configs/config.yaml"]
+
+# ------------------------------------------------------------------------------
+# Development stage (for debugging)
+# ------------------------------------------------------------------------------
+FROM alpine:3.19 AS development
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    bind-tools \
+    busybox-extras \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 1000 -S aos && \
+    adduser -u 1000 -S aos -G aos
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary and configuration
+COPY --from=builder --chown=aos:aos /app/aos /usr/local/bin/aos
+COPY --chown=aos:aos configs/ /app/configs/
+
+# Copy CA certificates
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/data && \
+    chown -R aos:aos /app
+
+# Switch to non-root user
+USER aos
+
+# Expose ports
+EXPOSE 8080 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://localhost:8080/health || exit 1
+
+# Entrypoint
+ENTRYPOINT ["aos"]
+
+# Default command
+CMD ["--config", "/app/configs/config.yaml"]

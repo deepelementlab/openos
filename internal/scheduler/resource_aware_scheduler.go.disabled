@@ -1,0 +1,555 @@
+package scheduler
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/agentos/aos/internal/config"
+)
+
+// ScheduleStrategy defines the scheduling algorithm
+type ScheduleStrategy string
+
+const (
+	StrategyRoundRobin  ScheduleStrategy = "round-robin"
+	StrategyBestFit      ScheduleStrategy = "best-fit"
+	StrategyLeastLoaded ScheduleStrategy = "least-loaded"
+)
+
+// ResourceAwareScheduler implements resource-aware scheduling
+type ResourceAwareScheduler struct {
+	mu            sync.RWMutex
+	nodes         map[string]*NodeResourceState
+	 allocations  map[string]*ResourceAllocation // taskID -> allocation
+	strategy      ScheduleStrategy
+	cfg          *config.Config
+
+	// Metrics
+	totalScheduled int64
+	totalFailed    int64
+	totalRescheduled int64
+}
+
+// NodeResourceState tracks detailed resource information per node
+type NodeResourceState struct {
+	NodeID         string
+	NodeName       string
+	Address        string
+	Health         string
+	LastUpdate     time.Time
+
+	// Total resources
+	TotalCPU       int64 // millicores (1000m = 1 core)
+	TotalMemory    int64 // bytes
+	TotalGPU       int    // count
+	TotalStorage   int64 // bytes
+
+	// Allocated resources
+	AllocatedCPU   int64
+	AllocatedMemory int64
+	AllocatedGPU   int
+	AllocatedStorage int64
+
+	// Available resources (calculated)
+	AvailableCPU     int64
+	AvailableMemory  int64
+	AvailableGPU     int
+	AvailableStorage int64
+
+	// Workload info
+	AgentCount int
+}
+
+// ResourceAllocation tracks resource allocation for a task
+type ResourceAllocation struct {
+	TaskID        string
+	NodeID        string
+	CPUAllocated  int64
+	MemoryAllocated int64
+	GPUAllocated    int
+	StorageAllocated int64
+	AllocatedAt    time.Time
+}
+
+// ResourceRequirement represents resource needs for a task
+type ResourceRequirement struct {
+	CPU     int64 // millicores
+	Memory  int64 // bytes
+	GPU     int    // count
+	Storage int64 // bytes
+}
+
+// NewResourceAwareScheduler creates a new resource-aware scheduler
+func NewResourceAwareScheduler() *ResourceAwareScheduler {
+	return &ResourceAwareScheduler{
+		nodes:        make(map[string]*NodeResourceState),
+		allocations: make(map[string]*ResourceAllocation),
+		strategy:     StrategyLeastLoaded, // Default strategy
+	}
+}
+
+// NewResourceAwareSchedulerWithStrategy creates scheduler with specific strategy
+func NewResourceAwareSchedulerWithStrategy(strategy ScheduleStrategy) *ResourceAwareScheduler {
+	s := NewResourceAwareScheduler()
+	s.strategy = strategy
+	return s
+}
+
+// Initialize initializes the scheduler with config
+func (s *ResourceAwareScheduler) Initialize(ctx context.Context, cfg *config.Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg = cfg
+	
+	 // Set strategy from config if specified
+	if cfg != nil && cfg.Scheduler != nil {
+	 if cfg.Scheduler.Strategy != "" {
+            s.strategy = ScheduleStrategy(cfg.Scheduler.Strategy)
+        }
+    }
+    }
+    return nil
+}
+
+// Schedule performs resource-aware scheduling
+func (s *ResourceAwareScheduler) Schedule(ctx context.Context, req TaskRequest) (*ScheduleResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Convert TaskRequest to ResourceRequirement
+	resourceReq := s.convertTaskRequest(req)
+
+	// 1. Filter eligible nodes
+    eligible := s.filterNodes(resourceReq, req.Affinity, req.AntiAffinity)
+    if len(eligible) == 0 {
+        s.totalFailed++
+        return &ScheduleResult{
+            Success: false,
+            TaskID:  req.TaskID,
+            Reason:  "no_eligible_node",
+            Message: "no node has enough resources or matches constraints",
+        }, nil
+    }
+
+    // 2. Select best node based on strategy
+    selected := s.selectNode(eligible, resourceReq, s.strategy)
+    if selected == nil {
+        s.totalFailed++
+        return &ScheduleResult{
+            Success: false,
+            TaskID:  req.TaskID,
+            Reason:  "selection_failed",
+            Message: "failed to select a node",
+        }, nil
+    }
+
+    // 3. Allocate resources
+    if err := s.allocateResources(selected, req.TaskID, resourceReq); err != nil {
+        s.totalFailed++
+        return &ScheduleResult{
+            Success: false,
+            TaskID:  req.TaskID,
+            Reason:  "allocation_failed",
+            Message: fmt.Sprintf("failed to allocate resources: %v", err),
+        }, nil
+    }
+
+    // 4. Update metrics
+    s.totalScheduled++
+
+    // 5. Return result
+    return &ScheduleResult{
+        Success:  true,
+        TaskID:  req.TaskID,
+        NodeID:  selected.NodeID,
+        Reason:  "scheduled",
+        Message: fmt.Sprintf("task scheduled to node %s", selected.NodeID),
+    }, nil
+}
+
+// ScheduleBatch schedules multiple tasks at once
+func (s *ResourceAwareScheduler) ScheduleBatch(ctx context.Context, reqs []TaskRequest) ([]ScheduleResult, error) {
+    results := make([]ScheduleResult, len(reqs))
+    
+    for i := range reqs {
+        result, err := s.Schedule(ctx, reqs[i])
+        if err != nil {
+            return nil, err
+        }
+        results[i] = *result
+    }
+    
+    return results, nil
+}
+
+// Reschedule reschedules a running task
+func (s *ResourceAwareScheduler) Reschedule(ctx context.Context, taskID string, reason RescheduleReason) (*ScheduleResult, error) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    // Find current allocation
+    allocation, exists := s.allocations[taskID]
+    if !exists {
+        return nil, fmt.Errorf("task %s not found", taskID)
+    }
+
+    // Get current node
+    node, exists := s.nodes[allocation.NodeID]
+    if !exists {
+        return nil, fmt.Errorf("node %s not found", allocation.NodeID)
+    }
+
+    // Release current resources
+    s.releaseResources(node, allocation)
+
+    // Remove allocation
+    delete(s.allocations, taskID)
+
+    // Reschedule with updated requirements if needed
+    // For now, just reschedule to the same or different node
+    req := TaskRequest{
+        TaskID:        taskID,
+        CPURequest:    float64(allocation.CPUAllocated) / 1000,
+        MemoryRequest: allocation.MemoryAllocated,
+    }
+
+    s.totalRescheduled++
+    return s.Schedule(ctx, req)
+}
+
+// CancelTask cancels a task and releases resources
+func (s *ResourceAwareScheduler) CancelTask(ctx context.Context, taskID string) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    allocation, exists := s.allocations[taskID]
+    if !exists {
+        return nil, fmt.Errorf("task %s not found", taskID)
+    }
+
+    node, exists := s.nodes[allocation.NodeID]
+    if !exists {
+        return nil, fmt.Errorf("node %s not found", allocation.NodeID)
+    }
+
+    // Release resources
+    s.releaseResources(node, allocation)
+
+    // Remove allocation
+    delete(s.allocations, taskID)
+    return nil
+}
+
+// AddNode adds a new node to the scheduler
+func (s *ResourceAwareScheduler) AddNode(ctx context.Context, node NodeState) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    if _, exists := s.nodes[node.NodeID]; exists {
+        return fmt.Errorf("node %s already exists", node.NodeID)
+    }
+
+    // Convert NodeState to NodeResourceState
+    resourceNode := &NodeResourceState{
+        NodeID:         node.NodeID,
+        NodeName:       node.NodeName,
+        Address:        node.Address,
+        Health:         node.Health,
+        LastUpdate:     time.Now(),
+        TotalCPU:       int64(node.CPUCores) * 1000, // Convert cores to millicores
+        TotalMemory:    node.MemoryBytes,
+        TotalGPU:       0, // Default to 0, can be extended
+        TotalStorage:   node.DiskBytes,
+        AllocatedCPU:   0,
+        AllocatedMemory: 0,
+        AllocatedGPU:    0,
+        AllocatedStorage: 0,
+        AvailableCPU:     int64(node.CPUCores) * 1000,
+        AvailableMemory:  node.MemoryBytes,
+        AvailableGPU:     0,
+        AvailableStorage: node.DiskBytes,
+        AgentCount:       0,
+    }
+
+    s.nodes[node.NodeID] = resourceNode
+    return nil
+}
+
+// RemoveNode removes a node from the scheduler
+func (s *ResourceAwareScheduler) RemoveNode(ctx context.Context, nodeID string) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    if _, exists := s.nodes[nodeID]; !exists {
+        return fmt.Errorf("node %s not found", nodeID)
+    }
+
+    // Check for running tasks
+    for _, alloc := range s.allocations {
+        if alloc.NodeID == nodeID {
+            return fmt.Errorf("node %s has running tasks", nodeID)
+        }
+    }
+
+    delete(s.nodes, nodeID)
+    return nil
+}
+
+// UpdateNode updates node information
+func (s *ResourceAwareScheduler) UpdateNode(ctx context.Context, node NodeState) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    resourceNode, exists := s.nodes[node.NodeID]
+    if !exists {
+        return fmt.Errorf("node %s not found", node.NodeID)
+    }
+
+    // Update health status
+    resourceNode.Health = node.Health
+    resourceNode.LastUpdate = time.Now()
+
+    // Update available resources based on usage
+    if node.CPUUsage > 0 {
+        resourceNode.AvailableCPU = resourceNode.TotalCPU - int64(float64(resourceNode.TotalCPU)*node.CPUUsage/100)
+    }
+    if node.MemoryUsage > 0 {
+        resourceNode.AvailableMemory = resourceNode.TotalMemory - int64(float64(resourceNode.TotalMemory)*node.MemoryUsage/100)
+    }
+
+    s.nodes[node.NodeID] = resourceNode
+    return nil
+}
+
+// ListNodes returns all nodes
+func (s *ResourceAwareScheduler) ListNodes(ctx context.Context) ([]NodeState, error) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    nodes := make([]NodeState, 00, len(s.nodes))
+    for _, node := range s.nodes {
+        nodes = append(nodes, NodeState{
+            NodeID:      node.NodeID,
+            NodeName:    node.NodeName,
+            Address:     node.Address,
+            Health:      node.Health,
+            CPUCores:    int(node.TotalCPU / 1000),
+            MemoryBytes: node.TotalMemory,
+            DiskBytes:   node.TotalStorage,
+            AgentCount:  node.AgentCount,
+            LastUpdate:  node.LastUpdate,
+        })
+    }
+    return nodes, nil
+}
+
+// HealthCheck performs health check on all nodes
+func (s *ResourceAwareScheduler) HealthCheck(ctx context.Context) error {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    unhealthyNodes := []string{}
+    for _, node := range s.nodes {
+        if node.Health != "healthy" {
+            unhealthyNodes = append(unhealthyNodes, node.NodeID)
+        }
+    }
+
+    if len(unhealthyNodes) > 0 {
+        return fmt.Errorf("unhealthy nodes: %v", unhealthyNodes)
+    }
+    return nil
+}
+// GetStats returns scheduler metrics
+func (s *ResourceAwareScheduler) GetStats(ctx context.Context) (*SchedulerMetrics, error) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    return &SchedulerMetrics{
+        TotalScheduled:    s.totalScheduled,
+        TotalFailed:       s.totalFailed,
+        TotalRescheduled:   s.totalRescheduled,
+        NodeCount:         len(s.nodes),
+        ActiveAllocations: len(s.allocations),
+    }, nil
+}
+
+// Helper methods
+
+// filterNodes filters nodes based on resource requirements and constraints
+func (s *ResourceAwareScheduler) filterNodes(req ResourceRequirement, affinity, antiAffinity []string) []*NodeResourceState {
+    eligible := []*NodeResourceState{}
+
+    for _, node := range s.nodes {
+        // Check health
+        if node.Health != "healthy" {
+            continue
+        }
+
+        // Check CPU
+        if node.AvailableCPU < req.CPU {
+            continue
+        }
+
+        // Check memory
+        if node.AvailableMemory < req.Memory {
+            continue
+        }
+
+        // Check GPU if required
+        if req.GPU > 0 && node.AvailableGPU < req.GPU {
+            continue
+        }
+
+        // Check storage if required
+        if req.Storage > 0 && node.AvailableStorage < req.Storage {
+            continue
+        }
+
+        // Check affinity
+        if len(affinity) > 0 {
+            matched := false
+            for _, affinityNode := range affinity {
+                if node.NodeID == affinityNode {
+                    matched = true
+                    break
+                }
+            }
+            if !matched {
+                continue
+            }
+        }
+
+        // Check anti-affinity
+        for _, antiAffinityNode := range antiAffinity {
+            if node.NodeID == antiAffinityNode {
+                continue
+            }
+        }
+
+        eligible = append(eligible, node)
+    }
+
+    return eligible
+}
+
+// selectNode selects the best node based on strategy
+func (s *ResourceAwareScheduler) selectNode(nodes []*NodeResourceState, req ResourceRequirement, strategy ScheduleStrategy) *NodeResourceState {
+    if len(nodes) == 0 {
+        return nil
+    }
+
+    switch strategy {
+    case StrategyBestFit:
+        // Select node with least available resources that still meets requirements
+        return s.selectBestFitNode(nodes, req)
+    case StrategyLeastLoaded:
+        // Select node with lowest resource utilization
+        return s.selectLeastLoadedNode(nodes)
+    default: // StrategyRoundRobin
+        // Simple round-robin
+        return s.selectRoundRobinNode(nodes)
+    }
+}
+
+// selectBestFitNode selects node with best fit (least waste)
+func (s *ResourceAwareScheduler) selectBestFitNode(nodes []*NodeResourceState, req ResourceRequirement) *NodeResourceState {
+    var bestNode *NodeResourceState
+    minScore := float64(-1)
+
+    for _, node := range nodes {
+        // Calculate waste (remaining resources after allocation)
+        cpuWaste := float64(node.AvailableCPU-req.CPU) / float64(node.TotalCPU)
+        memWaste := float64(node.AvailableMemory-req.Memory) / float64(node.TotalMemory)
+        score := cpuWaste + memWaste
+
+        if minScore < 0 || score < minScore {
+            minScore = score
+            bestNode = node
+        }
+    }
+
+    return bestNode
+}
+// selectLeastLoadedNode selects node with lowest resource utilization
+func (s *ResourceAwareScheduler) selectLeastLoadedNode(nodes []*NodeResourceState) *NodeResourceState {
+    var selectedNode *NodeResourceState
+    minUtilization := float64(-1)
+
+    for _, node := range nodes {
+        // Calculate utilization
+        cpuUtil := float64(node.AllocatedCPU) / float64(node.TotalCPU)
+        memUtil := float64(node.AllocatedMemory) / float64(node.TotalMemory)
+        avgUtil := (cpuUtil + memUtil) / 2
+
+        if minUtilization < 0 || avgUtil < minUtilization {
+            minUtilization = avgUtil
+            selectedNode = node
+        }
+    }
+
+    return selectedNode
+}
+// selectRoundRobinNode selects node using round-robin
+func (s *ResourceAwareScheduler) selectRoundRobinNode(nodes []*NodeResourceState) *NodeResourceState {
+    if len(nodes) == 0 {
+        return nil
+    }
+    
+    // Simple round-robin based on index
+    idx := s.totalScheduled % int64(len(nodes))
+    return nodes[idx]
+}
+
+// allocateResources allocates resources for a task
+func (s *ResourceAwareScheduler) allocateResources(node *NodeResourceState, taskID string, req ResourceRequirement) error {
+    // Update node resources
+    node.AllocatedCPU += req.CPU
+    node.AllocatedMemory += req.Memory
+    node.AllocatedGPU += req.GPU
+    node.AllocatedStorage += req.Storage
+    node.AvailableCPU -= req.CPU
+    node.AvailableMemory -= req.Memory
+    node.AvailableGPU -= req.GPU
+    node.AvailableStorage -= req.Storage
+    node.AgentCount++
+    node.LastUpdate = time.Now()
+
+    // Record allocation
+    allocation := &ResourceAllocation{
+        TaskID:        taskID,
+        NodeID:        node.NodeID,
+        CPUAllocated:  req.CPU,
+        MemoryAllocated: req.Memory,
+        GPUAllocated:    req.GPU,
+        StorageAllocated: req.Storage,
+        AllocatedAt:    time.Now(),
+    }
+
+    s.allocations[taskID] = allocation
+    return nil
+}
+// releaseResources releases resources when a task is cancelled
+func (s *ResourceAwareScheduler) releaseResources(node *NodeResourceState, allocation *ResourceAllocation) {
+    node.AllocatedCPU -= allocation.CPUAllocated
+    node.AllocatedMemory -= allocation.MemoryAllocated
+    node.AllocatedGPU -= allocation.GPUAllocated
+    node.AllocatedStorage -= allocation.StorageAllocated
+    node.AvailableCPU += allocation.CPUAllocated
+    node.AvailableMemory += allocation.MemoryAllocated
+    node.AvailableGPU += allocation.GPUAllocated
+    node.AvailableStorage += allocation.StorageAllocated
+    node.AgentCount--
+    node.LastUpdate = time.Now()
+}
+// convertTaskRequest converts TaskRequest to ResourceRequirement
+func (s *ResourceAwareScheduler) convertTaskRequest(req TaskRequest) ResourceRequirement {
+    return ResourceRequirement{
+        CPU:     int64(req.CPURequest * 1000), // Convert to millicores
+        Memory:  req.MemoryRequest,
+        GPU:     0, // Default to 0, can be extended
+        Storage: req.DiskRequest,
+    }
+}

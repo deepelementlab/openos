@@ -1,0 +1,234 @@
+syntax = "proto3";
+
+package aos.api.v1;
+
+option go_package = "github.com/agentos/aos/api/grpc/pb";
+
+import "google/protobuf/timestamp.proto";
+import "common.proto";
+
+// Runtime service for managing container runtimes and images
+service RuntimeService {
+  // List available runtimes
+  rpc ListRuntimes(ListRuntimesRequest) returns (ListRuntimesResponse);
+  
+  // Get runtime information
+  rpc GetRuntime(GetRuntimeRequest) returns (Runtime);
+  
+  // List available images
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  
+  // Get image details
+  rpc GetImage(GetImageRequest) returns (Image);
+  
+  // Pull an image
+  rpc PullImage(PullImageRequest) returns (stream PullImageProgress);
+  
+  // Remove an image
+  rpc RemoveImage(RemoveImageRequest) returns (Empty);
+  
+  // List nodes in the cluster
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  
+  // Get node information
+  rpc GetNode(GetNodeRequest) returns (Node);
+  
+  // Drain a node (move agents away)
+  rpc DrainNode(DrainNodeRequest) returns (NodeActionResponse);
+  
+  // Cordon a node (prevent scheduling)
+  rpc CordonNode(CordonNodeRequest) returns (NodeActionResponse);
+  
+  // Uncordon a node (allow scheduling)
+  rpc UncordonNode(UncordonNodeRequest) returns (NodeActionResponse);
+}
+
+// Runtime information
+message Runtime {
+  string name = 1;           // "containerd", "docker", "gvisor", "kata"
+  string version = 2;
+  RuntimeStatus status = 3;
+  map<string, string> features = 4;
+  map<string, string> config = 5;
+  google.protobuf.Timestamp discovered_at = 6;
+  google.protobuf.Timestamp last_seen_at = 7;
+}
+
+// Runtime status
+enum RuntimeStatus {
+  RUNTIME_STATUS_UNSPECIFIED = 0;
+  AVAILABLE = 1;
+  UNAVAILABLE = 2;
+  DEGRADED = 3;
+  MAINTENANCE = 4;
+}
+
+// Image information
+message Image {
+  string id = 1;
+  string name = 2;
+  string tag = 3;
+  string registry = 4;
+  int64 size_bytes = 5;
+  string architecture = 6;
+  string os = 7;
+  map<string, string> labels = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp pulled_at = 10;
+  int32 agent_count = 11;  // Number of agents using this image
+}
+
+// Node information
+message Node {
+  string id = 1;
+  string name = 2;
+  NodeStatus status = 3;
+  NodeResources resources = 4;
+  map<string, string> labels = 5;
+  map<string, string> annotations = 6;
+  repeated string runtimes = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp last_heartbeat_at = 9;
+  string version = 10;
+}
+
+// Node status
+enum NodeStatus {
+  NODE_STATUS_UNSPECIFIED = 0;
+  READY = 1;
+  NOT_READY = 2;
+  SCHEDULING_DISABLED = 3;
+  DRAINING = 4;
+  MAINTENANCE = 5;
+}
+
+// Node resources
+message NodeResources {
+  int32 cpu_cores = 1;
+  int64 memory_bytes = 2;
+  int64 storage_bytes = 3;
+  int32 gpu_count = 4;
+  double cpu_utilization = 5;  // Percentage
+  double memory_utilization = 6; // Percentage
+  int32 running_agents = 7;
+  int32 max_agents = 8;
+}
+
+// List runtimes request
+message ListRuntimesRequest {
+  RuntimeStatus status = 1;  // Filter by status
+}
+
+// List runtimes response
+message ListRuntimesResponse {
+  repeated Runtime runtimes = 1;
+}
+
+// Get runtime request
+message GetRuntimeRequest {
+  string runtime_name = 1;
+}
+
+// List images request
+message ListImagesRequest {
+  PaginationRequest pagination = 1;
+  string registry = 2;  // Filter by registry
+  string search = 3;   // Search by name
+}
+
+// List images response
+message ListImagesResponse {
+  repeated Image images = 1;
+  PaginationResponse pagination = 2;
+  int64 total_size_bytes = 3;
+}
+
+// Get image request
+message GetImageRequest {
+  string image_id = 1;
+  // OR
+  string image_name = 2;
+  string tag = 3;
+}
+
+// Pull image request
+message PullImageRequest {
+  string image_name = 1;
+  string tag = 2;
+  string registry = 3;
+  string runtime = 4;  // Target runtime
+  bool force = 5;      // Pull even if exists
+}
+
+// Pull image progress
+message PullImageProgress {
+  string image_name = 1;
+  string tag = 2;
+  PullStatus status = 3;
+  int64 total_bytes = 4;
+  int64 downloaded_bytes = 5;
+  int32 progress_percent = 6;
+  string layer_id = 7;
+  string message = 8;
+}
+
+// Pull status
+enum PullStatus {
+  PULL_STATUS_UNSPECIFIED = 0;
+  PULLING = 1;
+  EXTRACTING = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+}
+
+// Remove image request
+message RemoveImageRequest {
+  string image_id = 1;
+  bool force = 2;  // Remove even if in use
+}
+
+// List nodes request
+message ListNodesRequest {
+  PaginationRequest pagination = 1;
+  NodeStatus status = 2;
+  map<string, string> labels = 3;
+}
+
+// List nodes response
+message ListNodesResponse {
+  repeated Node nodes = 1;
+  PaginationResponse pagination = 2;
+}
+
+// Get node request
+message GetNodeRequest {
+  string node_id = 1;
+}
+
+// Drain node request
+message DrainNodeRequest {
+  string node_id = 1;
+  bool graceful = 2;
+  int32 timeout_seconds = 3;
+}
+
+// Cordon node request
+message CordonNodeRequest {
+  string node_id = 1;
+  string reason = 2;
+}
+
+// Uncordon node request
+message UncordonNodeRequest {
+  string node_id = 1;
+}
+
+// Node action response
+message NodeActionResponse {
+  string node_id = 1;
+  string action = 2;  // "drain", "cordon", "uncordon"
+  NodeStatus old_status = 3;
+  NodeStatus new_status = 4;
+  string message = 5;
+  google.protobuf.Timestamp completed_at = 6;
+}

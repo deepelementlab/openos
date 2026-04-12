@@ -1,0 +1,344 @@
+syntax = "proto3";
+
+package aos.api.v1;
+
+option go_package = "github.com/agentos/aos/api/grpc/pb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "common.proto";
+
+// Monitoring service for system health and metrics
+service MonitoringService {
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // Get system metrics
+  rpc GetSystemMetrics(GetSystemMetricsRequest) returns (SystemMetrics);
+  
+  // Stream system metrics (server-side streaming)
+  rpc StreamSystemMetrics(StreamSystemMetricsRequest) returns (stream SystemMetrics);
+  
+  // Get service status
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus);
+  
+  // Get alerts
+  rpc GetAlerts(GetAlertsRequest) returns (GetAlertsResponse);
+  
+  // Acknowledge alert
+  rpc AcknowledgeAlert(AcknowledgeAlertRequest) returns (Alert);
+  
+  // Stream events (server-side streaming)
+  rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+  
+  // Get audit logs
+  rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse);
+  
+  // Get performance metrics
+  rpc GetPerformanceMetrics(GetPerformanceMetricsRequest) returns (PerformanceMetrics);
+}
+
+// Health check request
+message HealthCheckRequest {
+  string service = 1;  // Specific service to check, empty for overall
+  bool include_details = 2;
+}
+
+// Health check response
+message HealthCheckResponse {
+  HealthStatus status = 1;
+  string version = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  int64 uptime_seconds = 4;
+  map<string, ServiceHealth> services = 5;  // Service name -> health
+  map<string, string> details = 6;
+}
+
+// Health status
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTHY = 1;
+  UNHEALTHY = 2;
+  DEGRADED = 3;
+  STARTING = 4;
+  SHUTTING_DOWN = 5;
+}
+
+// Service health details
+message ServiceHealth {
+  string name = 1;
+  HealthStatus status = 2;
+  string message = 3;
+  google.protobuf.Timestamp last_check = 4;
+  google.protobuf.Duration response_time = 5;
+  map<string, string> metadata = 6;
+}
+
+// System metrics request
+message GetSystemMetricsRequest {
+  string tenant_id = 1;  // Optional, for tenant-specific metrics
+  string time_range = 2;   // "1h", "24h", "7d", "30d"
+  string aggregation = 3;  // "avg", "sum", "max", "min"
+}
+
+// System metrics
+message SystemMetrics {
+  google.protobuf.Timestamp timestamp = 1;
+  string time_range = 2;
+  
+  // Cluster-wide metrics
+  ClusterMetrics cluster = 3;
+  
+  // Per-tenant metrics (if requested)
+  map<string, TenantMetrics> tenants = 4;
+  
+  // Per-service metrics
+  map<string, ServiceMetrics> services = 5;
+}
+
+// Cluster metrics
+message ClusterMetrics {
+  int32 total_nodes = 1;
+  int32 ready_nodes = 2;
+  int32 total_agents = 3;
+  int32 running_agents = 4;
+  double cpu_utilization = 5;
+  double memory_utilization = 6;
+  double storage_utilization = 7;
+  int64 network_rx_bytes = 8;
+  int64 network_tx_bytes = 9;
+}
+
+// Tenant metrics
+message TenantMetrics {
+  string tenant_id = 1;
+  int32 agent_count = 2;
+  double resource_usage_percent = 3;
+  int64 api_calls = 4;
+  double avg_response_time = 5;
+  double error_rate = 6;
+}
+
+// Service metrics
+message ServiceMetrics {
+  string service_name = 1;
+  int32 request_count = 2;
+  double avg_latency_ms = 3;
+  double p95_latency_ms = 4;
+  double p99_latency_ms = 5;
+  double error_rate = 6;
+  int32 active_connections = 7;
+}
+
+// Stream system metrics request
+message StreamSystemMetricsRequest {
+  int32 interval_seconds = 1;  // Sampling interval
+  repeated string metric_names = 2;  // Specific metrics to stream
+}
+
+// Get service status request
+message GetServiceStatusRequest {
+  string service_name = 1;  // Empty for all services
+}
+
+// Service status
+message ServiceStatus {
+  string name = 1;
+  ServiceState state = 2;
+  string version = 3;
+  google.protobuf.Timestamp started_at = 4;
+  int64 uptime_seconds = 5;
+  map<string, string> endpoints = 6;  // Protocol -> endpoint
+  map<string, string> metadata = 7;
+}
+
+// Service state
+enum ServiceState {
+  SERVICE_STATE_UNSPECIFIED = 0;
+  RUNNING = 1;
+  STOPPED = 2;
+  FAILED = 3;
+  RECOVERING = 4;
+}
+
+// Get alerts request
+message GetAlertsRequest {
+  PaginationRequest pagination = 1;
+  AlertSeverity severity = 2;
+  AlertStatus status = 3;
+  string service = 4;
+  string time_range = 5;
+}
+
+// Get alerts response
+message GetAlertsResponse {
+  repeated Alert alerts = 1;
+  PaginationResponse pagination = 2;
+  map<string, int32> severity_counts = 3;
+}
+
+// Alert
+message Alert {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  AlertSeverity severity = 4;
+  AlertStatus status = 5;
+  string service = 6;
+  map<string, string> labels = 7;
+  google.protobuf.Timestamp fired_at = 8;
+  google.protobuf.Timestamp acknowledged_at = 9;
+  string acknowledged_by = 10;
+  google.protobuf.Timestamp resolved_at = 11;
+  string message = 12;
+  float value = 13;  // Metric value that triggered alert
+  string threshold = 14;  // Threshold condition
+}
+
+// Alert severity
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  INFO = 1;
+  WARNING = 2;
+  CRITICAL = 3;
+  EMERGENCY = 4;
+}
+
+// Alert status
+enum AlertStatus {
+  ALERT_STATUS_UNSPECIFIED = 0;
+  FIRING = 1;
+  ACKNOWLEDGED = 2;
+  RESOLVED = 3;
+  SILENCED = 4;
+}
+
+// Acknowledge alert request
+message AcknowledgeAlertRequest {
+  string alert_id = 1;
+  string comment = 2;
+}
+
+// Stream events request
+message StreamEventsRequest {
+  repeated string event_types = 1;  // Filter by types
+  repeated string resource_types = 2; // Filter by resource types
+  string tenant_id = 3;  // Filter by tenant
+  int32 buffer_size = 4;   // Event buffer size
+}
+
+// Event
+message Event {
+  string id = 1;
+  string type = 2;  // "agent.created", "agent.started", "tenant.suspended", etc.
+  string resource_type = 3;  // "agent", "tenant", "node", etc.
+  string resource_id = 4;
+  string tenant_id = 5;
+  string user_id = 6;
+  map<string, string> metadata = 7;
+  google.protobuf.Timestamp timestamp = 8;
+  string message = 9;
+}
+
+// Get audit logs request
+message GetAuditLogsRequest {
+  PaginationRequest pagination = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string action = 4;  // "create", "update", "delete", etc.
+  string resource_type = 5;
+  string time_range = 6;
+}
+
+// Get audit logs response
+message GetAuditLogsResponse {
+  repeated AuditLog logs = 1;
+  PaginationResponse pagination = 2;
+}
+
+// Audit log entry
+message AuditLog {
+  string id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string action = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  map<string, string> old_values = 7;
+  map<string, string> new_values = 8;
+  string ip_address = 9;
+  string user_agent = 10;
+  google.protobuf.Timestamp timestamp = 11;
+  string result = 12;  // "success", "failure"
+  string error_message = 13;
+}
+
+// Get performance metrics request
+message GetPerformanceMetricsRequest {
+  string target = 1;  // "system", "database", "network", "storage"
+  string time_range = 2;
+}
+
+// Performance metrics
+message PerformanceMetrics {
+  string target = 1;
+  string time_range = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  
+  // Database metrics
+  DatabaseMetrics database = 4;
+  
+  // Network metrics
+  NetworkMetrics network = 5;
+  
+  // Storage metrics
+  StorageMetrics storage = 6;
+  
+  // General performance
+  GeneralMetrics general = 7;
+}
+
+// Database metrics
+message DatabaseMetrics {
+  int32 active_connections = 1;
+  int32 idle_connections = 2;
+  int32 max_connections = 3;
+  double query_latency_avg_ms = 4;
+  double query_latency_p95_ms = 5;
+  int64 queries_per_second = 6;
+  int64 transaction_rate = 7;
+  int64 slow_queries = 8;
+}
+
+// Network metrics
+message NetworkMetrics {
+  double throughput_rx_mbps = 1;
+  double throughput_tx_mbps = 2;
+  int32 active_connections = 3;
+  double latency_avg_ms = 4;
+  double packet_loss_percent = 5;
+  int64 errors = 6;
+}
+
+// Storage metrics
+message StorageMetrics {
+  int64 total_bytes = 1;
+  int64 used_bytes = 2;
+  int64 free_bytes = 3;
+  double utilization_percent = 4;
+  double iops_read = 5;
+  double iops_write = 6;
+  double throughput_read_mbps = 7;
+  double throughput_write_mbps = 8;
+  double latency_avg_ms = 9;
+}
+
+// General metrics
+message GeneralMetrics {
+  double cpu_usage_percent = 1;
+  double memory_usage_percent = 2;
+  int32 goroutine_count = 3;
+  int64 heap_alloc_bytes = 4;
+  int64 gc_pause_ns = 5;
+  int32 open_files = 6;
+}

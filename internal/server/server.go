@@ -17,6 +17,8 @@ import (
 	"github.com/agentos/aos/internal/data/transaction"
 	"github.com/agentos/aos/internal/health"
 	"github.com/agentos/aos/internal/monitoring"
+	"github.com/agentos/aos/internal/orchestration"
+	"github.com/agentos/aos/internal/orchestration/workflow"
 	"github.com/agentos/aos/internal/scheduler"
 	"github.com/agentos/aos/internal/version"
 	"github.com/google/uuid"
@@ -25,17 +27,19 @@ import (
 
 // Server represents the Agent OS HTTP server.
 type Server struct {
-	config        *config.Config
-	logger        *zap.Logger
-	server        *http.Server
-	metrics       *monitoring.Metrics
-	healthChecker *health.Checker
-	scheduler     scheduler.Scheduler
-	agentRepo     repository.AgentRepository
-	uow           transaction.UnitOfWork
-	outbox        outbox.Publisher
-	healthStatus  string
-	startTime     time.Time
+	config             *config.Config
+	logger             *zap.Logger
+	server             *http.Server
+	metrics            *monitoring.Metrics
+	healthChecker      *health.Checker
+	scheduler          scheduler.Scheduler
+	agentRepo          repository.AgentRepository
+	uow                transaction.UnitOfWork
+	outbox             outbox.Publisher
+	workflowEngine     *workflow.WorkflowEngine
+	stateMachineEngine *orchestration.StateMachineEngine
+	healthStatus       string
+	startTime          time.Time
 }
 
 // NewServer creates a new server instance.
@@ -76,6 +80,9 @@ func NewServer(cfg *config.Config, logger *zap.Logger) (*Server, error) {
 		startTime:     time.Now(),
 	}
 
+	// Initialize orchestration engines
+	s.initializeOrchestration()
+
 	// Initialize metrics
 	metrics, err := monitoring.NewMetrics(&cfg.Monitoring)
 	if err != nil {
@@ -114,12 +121,42 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// API endpoints
 	mux.HandleFunc("/api/v1/agents", s.handleAgents)
 	mux.HandleFunc("/api/v1/agents/", s.handleAgent)
-	
+
+	// Workflow endpoints
+	mux.HandleFunc("/api/v1/workflows", s.handleWorkflows)
+	mux.HandleFunc("/api/v1/workflows/", s.handleWorkflow)
+	mux.HandleFunc("/api/v1/workflows//start", s.handleStartWorkflow)
+	mux.HandleFunc("/api/v1/instances/", s.handleWorkflowInstance)
+
+	// State machine endpoints
+	mux.HandleFunc("/api/v1/state-machines/", s.handleStateMachine)
+
 	// Monitoring endpoints
 	mux.HandleFunc("/metrics", s.handleMetrics)
-	
+
 	// Root endpoint
 	mux.HandleFunc("/", s.handleRoot)
+}
+
+// initializeOrchestration initializes the orchestration engines.
+func (s *Server) initializeOrchestration() {
+	// Initialize state machine engine
+	stateMachineOpts := orchestration.StateMachineOptions{
+		Persistence: nil, // Use in-memory for now
+		Logger:      s.logger,
+	}
+	s.stateMachineEngine = orchestration.NewStateMachineEngine(stateMachineOpts)
+
+	// Initialize workflow engine
+	workflowOpts := workflow.EngineOptions{
+		Registry:     nil, // Use default workflows
+		StepRegistry: nil,
+		Store:        nil, // Use in-memory store
+		Logger:       s.logger,
+	}
+	s.workflowEngine = workflow.NewWorkflowEngine(workflowOpts)
+
+	s.logger.Info("Orchestration engines initialized")
 }
 
 // Start starts the HTTP server.
@@ -488,6 +525,192 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 // writeJSON writes JSON response.
 func writeJSON(w http.ResponseWriter, data interface{}) error {
 	return json.NewEncoder(w).Encode(data)
+}
+
+// handleWorkflows handles workflow collection endpoints.
+func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// List available workflows
+		workflows := s.workflowEngine.Stats()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, workflows)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleWorkflow handles individual workflow endpoints.
+func (s *Server) handleWorkflow(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get workflow details
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, map[string]string{"status": "available"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleStartWorkflow handles workflow start requests.
+func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type startWorkflowRequest struct {
+		WorkflowID string                 `json:"workflow_id"`
+		EntityID   string                 `json:"entity_id"`
+		EntityType string                 `json:"entity_type"`
+		Input      map[string]interface{} `json:"input,omitempty"`
+	}
+
+	var req startWorkflowRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/workflows/start", "bad_request")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkflowID == "" || req.EntityID == "" {
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/workflows/start", "validation_failed")
+		http.Error(w, "workflow_id and entity_id are required", http.StatusBadRequest)
+		return
+	}
+
+	instance, err := s.workflowEngine.StartWorkflow(r.Context(), req.WorkflowID, req.EntityID, req.EntityType, req.Input)
+	if err != nil {
+		s.logger.Error("failed to start workflow", zap.Error(err))
+		s.metrics.IncAPIError(http.MethodPost, "/api/v1/workflows/start", "start_failed")
+		http.Error(w, "failed to start workflow", http.StatusInternalServerError)
+		return
+	}
+
+	s.metrics.IncAPIRequest(http.MethodPost, "/api/v1/workflows/start", http.StatusAccepted)
+
+	response := map[string]interface{}{
+		"instance_id": instance.ID,
+		"workflow_id": req.WorkflowID,
+		"entity_id":   req.EntityID,
+		"status":      instance.Status,
+		"started_at":  instance.StartedAt.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = writeJSON(w, response)
+}
+
+// handleWorkflowInstance handles workflow instance endpoints.
+func (s *Server) handleWorkflowInstance(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		http.Error(w, "instance ID is required", http.StatusBadRequest)
+		return
+	}
+
+	instanceID := parts[0]
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get instance details
+		instance, err := s.workflowEngine.GetInstance(r.Context(), instanceID)
+		if err != nil {
+			s.metrics.IncAPIError(http.MethodGet, "/api/v1/instances/", "not_found")
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+
+		s.metrics.IncAPIRequest(http.MethodGet, "/api/v1/instances/", http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, instance)
+
+	case http.MethodDelete:
+		// Cancel workflow instance
+		if err := s.workflowEngine.CancelWorkflow(r.Context(), instanceID); err != nil {
+			s.metrics.IncAPIError(http.MethodDelete, "/api/v1/instances/", "cancel_failed")
+			http.Error(w, "failed to cancel workflow", http.StatusInternalServerError)
+			return
+		}
+
+		s.metrics.IncAPIRequest(http.MethodDelete, "/api/v1/instances/", http.StatusOK)
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, map[string]string{"status": "cancelled"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleStateMachine handles state machine endpoints.
+func (s *Server) handleStateMachine(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/state-machines/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		http.Error(w, "entity ID is required", http.StatusBadRequest)
+		return
+	}
+
+	entityID := parts[0]
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get state machine status
+		summary, err := s.stateMachineEngine.GetStateSummary(entityID)
+		if err != nil {
+			s.metrics.IncAPIError(http.MethodGet, "/api/v1/state-machines/", "not_found")
+			http.Error(w, "state machine not found", http.StatusNotFound)
+			return
+		}
+
+		s.metrics.IncAPIRequest(http.MethodGet, "/api/v1/state-machines/", http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, summary)
+
+	case http.MethodPost:
+		// Send event to state machine
+		type sendEventRequest struct {
+			Event string                 `json:"event"`
+			Data  map[string]interface{} `json:"data,omitempty"`
+		}
+
+		var req sendEventRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.metrics.IncAPIError(http.MethodPost, "/api/v1/state-machines/", "bad_request")
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		result, err := s.stateMachineEngine.SendEvent(r.Context(), entityID, req.Event, req.Data)
+		if err != nil {
+			s.logger.Error("failed to send state machine event", zap.Error(err))
+			s.metrics.IncAPIError(http.MethodPost, "/api/v1/state-machines/", "event_failed")
+			http.Error(w, "failed to send event", http.StatusInternalServerError)
+			return
+		}
+
+		s.metrics.IncAPIRequest(http.MethodPost, "/api/v1/state-machines/", http.StatusOK)
+
+		response := map[string]interface{}{
+			"success":    result.Success,
+			"from_state": result.From,
+			"to_state":   result.To,
+			"duration_ms": result.Duration().Milliseconds(),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = writeJSON(w, response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func initPostgresDataComponents(

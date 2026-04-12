@@ -25,7 +25,8 @@ type Config struct {
 	Storage    StorageConfig    `mapstructure:"storage"`
 	Network    NetworkConfig    `mapstructure:"network"`
 	Features   FeaturesConfig   `mapstructure:"features"`
-	
+	Messaging  MessagingConfig  `mapstructure:"messaging"`
+
 	// Global settings
 	Mode  string `mapstructure:"mode"`
 	Debug bool   `mapstructure:"debug"`
@@ -180,6 +181,31 @@ type FeaturesConfig struct {
 	AuditLogging  bool `mapstructure:"audit_logging"`
 }
 
+// MessagingConfig holds messaging and event bus configuration
+type MessagingConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	Driver            string        `mapstructure:"driver"`
+	NATS              NATSConfig    `mapstructure:"nats"`
+	EventBufferSize   int           `mapstructure:"event_buffer_size"`
+	PublishTimeout    time.Duration `mapstructure:"publish_timeout"`
+	MaxRetries        int           `mapstructure:"max_retries"`
+	RetryBackoff      time.Duration `mapstructure:"retry_backoff"`
+}
+
+// NATSConfig holds NATS-specific configuration
+type NATSConfig struct {
+	URL               string        `mapstructure:"url"`
+	Token             string        `mapstructure:"token"`
+	CredentialsFile     string        `mapstructure:"credentials_file"`
+	TLSCert           string        `mapstructure:"tls_cert"`
+	TLSKey            string        `mapstructure:"tls_key"`
+	TLSCA             string        `mapstructure:"tls_ca"`
+	ReconnectWait     time.Duration `mapstructure:"reconnect_wait"`
+	MaxReconnects     int           `mapstructure:"max_reconnects"`
+	JetStreamEnabled  bool          `mapstructure:"jetstream_enabled"`
+	JetStreamDomain   string        `mapstructure:"jetstream_domain"`
+}
+
 // LoadConfig loads configuration from file and environment variables
 func LoadConfig(configPath string) (*Config, error) {
 	v := viper.New()
@@ -290,6 +316,20 @@ func setDefaults(v *viper.Viper) {
 	// Global defaults
 	v.SetDefault("mode", "release")
 	v.SetDefault("debug", false)
+
+	// Messaging defaults
+	v.SetDefault("messaging.enabled", true)
+	v.SetDefault("messaging.driver", "nats")
+	v.SetDefault("messaging.event_buffer_size", 1000)
+	v.SetDefault("messaging.publish_timeout", 5)
+	v.SetDefault("messaging.max_retries", 3)
+	v.SetDefault("messaging.retry_backoff", 1)
+
+	// NATS defaults
+	v.SetDefault("messaging.nats.url", "nats://localhost:4222")
+	v.SetDefault("messaging.nats.reconnect_wait", 1)
+	v.SetDefault("messaging.nats.max_reconnects", 10)
+	v.SetDefault("messaging.nats.jetstream_enabled", false)
 }
 
 const defaultConfigPath = "config.yaml"

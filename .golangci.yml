@@ -1,154 +1,110 @@
-# GolangCI-Lint configuration for Agent OS
-
 run:
-  # Timeout for analysis
   timeout: 5m
-
-  # Default concurrency is number of CPUs
-  concurrency: 4
-
-  # Modules download mode
   modules-download-mode: readonly
+  tests: true
 
-  # Skip specific directories
-  skip-dirs:
-    - .github
-    - scripts
-    - vendor
-    - tmp
-    - testdata
-    - docs
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
 
 linters:
-  # Disable all linters by default, then enable specific ones
   disable-all: true
   enable:
-    # Code style and formatting
-    - gofmt
-    - goimports
-    - gocyclo
-    
-    # Performance
-    - prealloc
-    
-    # Correctness
+    # Code quality
     - bodyclose
-    - durationcheck
-    - exportloopref
+    - contextcheck
+    - dupl
+    - errcheck
+    - errorlint
+    - exhaustive
     - goconst
     - gocritic
-    - godot
-    - godox
-    - goerr113
-    - gomnd
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomoddirectives
+    - goprintffuncname
     - gosec
+    - gosimple
     - govet
     - ineffassign
     - misspell
     - nakedret
-    - nilerr
+    - nestif
     - noctx
-    - rowserrcheck
+    - nolintlint
+    - prealloc
+    - predeclared
+    - revive
     - staticcheck
     - stylecheck
+    - typecheck
     - unconvert
     - unparam
-    - whitespace
-    
-    # Unused code
-    - deadcode
     - unused
-    - varcheck
+    - whitespace
 
 linters-settings:
   gocyclo:
     min-complexity: 15
-  
-  gomnd:
-    # Don't warn about 0, 1, 2, etc.
-    settings:
-      mnd:
-        checks:
-          - argument
-          - case
-          - condition
-          - operation
-          - return
-        ignored-numbers:
-          - "0"
-          - "1"
-          - "2"
-          - "10"
-          - "100"
-          - "1000"
-          - "1024"
-          - "60"
-          - "3600"
-  
-  gosec:
-    # Security checks
-    excludes:
-      - G101 # Look for hard coded credentials
-      - G104 # Audit errors not checked
-      - G204 # Audit use of command execution
-      - G304 # File path provided as taint input
-  
-  staticcheck:
-    checks: ["all"]
-  
-  stylecheck:
-    checks: ["all"]
-  
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  gofmt:
+    simplify: true
   govet:
     check-shadowing: true
+  misspell:
+    locale: US
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+  staticcheck:
+    checks:
+      - all
+  stylecheck:
+    checks:
+      - all
+  dupl:
+    threshold: 100
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
 
 issues:
-  # Maximum issues count per linter
   max-issues-per-linter: 0
-  
-  # Maximum same issues count
   max-same-issues: 0
-  
-  # Show only new issues if it's a pull request
-  new: false
-  
-  # Exclude specific issues
   exclude-rules:
-    # Exclude some linters from running on tests
-    - path: _test\.go$
+    # Exclude tests from some linters
+    - path: _test\.go
       linters:
-        - gocyclo
-        - gomnd
         - dupl
-        - funlen
-    
-    # Allow TODO/BUG comments
-    - linters:
-        - godox
-      text: "TODO|FIXME|BUG|HACK"
-    
-    # Allow common abbreviations
-    - linters:
-        - misspell
-      text: "(cancelation|cancellation)|(referer|referrer)"
-    
-    # Ignore variable naming for common patterns
-    - linters:
-        - stylecheck
-      text: "ST1003"
+        - goconst
+        - gocyclo
+    # Exclude generated code
+    - path: generated\.go
+      linters:
+        - all
+    # Runtime packages may have false positives
+    - path: pkg/runtime/
+      linters:
+        - gosec
 
 severity:
   default-severity: error
-
-output:
-  # Format of output
-  format: colored-line-number
-  
-  # Print lines of code with issue
-  print-issued-lines: true
-  
-  # Print linter name in the end of issue text
-  print-linter-name: true
-
-# Version of golangci-lint
-version: "1.55"
+  rules:
+    - linters:
+        - govet
+      severity: error
+    - linters:
+        - errcheck
+      severity: error
+    - linters:
+        - staticcheck
+      severity: error
+    - linters:
+        - gosec
+      severity: error

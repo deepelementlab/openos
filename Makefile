@@ -1,6 +1,6 @@
 # Agent OS Makefile
 
-.PHONY: all build test clean format lint run
+.PHONY: all build test clean format lint run coverage
 
 # Go module name
 MODULE := github.com/agentos/aos
@@ -52,13 +52,18 @@ build-windows:
 # Run tests
 test:
 	@echo "Running tests..."
-	@$(GO) test -v ./$(PKG_DIR)/... ./$(INTERNAL_DIR)/...
+	@$(GO) test -v -race ./$(PKG_DIR)/... ./$(INTERNAL_DIR)/...
 
-test-cover:
+# Run tests with coverage report
+coverage:
 	@echo "Running tests with coverage..."
-	@$(GO) test -coverprofile=coverage.out ./...
+	@$(GO) test -v -race -coverprofile=coverage.out ./...
+	@$(GOCOVER) -func=coverage.out
 	@$(GOCOVER) -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+	@echo "Coverage report generated: coverage.out and coverage.html"
+
+# Legacy test-cover target (alias for coverage)
+test-cover: coverage
 
 # Code quality
 format:
@@ -120,9 +125,10 @@ help:
 	@echo "  build-darwin    - Build for macOS"
 	@echo "  build-windows   - Build for Windows"
 	@echo "  test            - Run tests"
-	@echo "  test-cover      - Run tests with coverage"
+	@echo "  coverage        - Run tests with race and coverage report"
+	@echo "  test-cover      - Alias for coverage"
 	@echo "  format          - Format code"
-	@echo "  lint            - Lint code"
+	@echo "  lint            - Lint code with golangci-lint"
 	@echo "  clean           - Clean build artifacts"
 	@echo "  run             - Run the application"
 	@echo "  setup           - Setup development environment"

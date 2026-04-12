@@ -1,0 +1,333 @@
+// Package integration provides integration tests for Agent OS
+package integration
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/agentos/aos/internal/config"
+	"github.com/agentos/aos/internal/server"
+	"github.com/agentos/aos/internal/database"
+	"go.uber.org/zap"
+)
+
+// TestConfig holds test configuration
+type TestConfig struct {
+	DBConfig  database.Config
+	ServerURL string
+	TempDir   string
+}
+
+// SetupIntegrationTest sets up an integration test environment
+func SetupIntegrationTest(t *testing.T) (*server.Server, *sql.DB, func()) {
+	t.Helper()
+
+	// Create temporary directory for test data
+	tempDir := t.TempDir()
+	testConfigDir := filepath.Join(tempDir, "config")
+	if err := os.MkdirAll(testConfigDir, 0755); err != nil {
+		t.Fatalf("failed to create test config directory: %v", err)
+	}
+
+	// Create test configuration
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:                    "127.0.0.1",
+			Port:                    0, // Let OS assign port
+			Mode:                    "test",
+			GracefulShutdownTimeout: 1,
+			ReadTimeout:             30 * time.Second,
+			WriteTimeout:            30 * time.Second,
+			IdleTimeout:             60 * time.Second,
+		},
+		Database: config.DatabaseConfig{
+			Host:     "localhost",
+			Port:     5432,
+			User:     "test_user",
+			Password: "test_password",
+			Name:     "agentos_test",
+			SSLMode:  "disable",
+		},
+		Security: config.SecurityConfig{
+			JWTSecret:           "test-secret-key-for-integration-tests-only",
+			TokenExpiration:     24 * time.Hour,
+			EnableRBAC:          true,
+			EnableAuditLogging:  true,
+			CORSAllowedOrigins:  []string{"*"},
+			CORSAllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			CORSAllowedHeaders:  []string{"*"},
+		},
+		Agent: config.AgentConfig{
+			DefaultRuntime:   "containerd",
+			DefaultImagePull: true,
+			HealthCheck: config.HealthCheckConfig{
+				Interval: 30 * time.Second,
+				Timeout:  10 * time.Second,
+				Retries:  3,
+			},
+			ResourceLimits: config.ResourceLimits{
+				CPULimit:      "0.5",
+				MemoryLimit:   "512m",
+				NetworkLimit:  "100m",
+				StorageLimit:  "1g",
+				MaxAgents:     10,
+				MaxContainers: 20,
+			},
+		},
+		Monitoring: config.MonitoringConfig{
+			EnableMetrics:   true,
+			EnableTracing:   false,
+			MetricsEndpoint: "/metrics",
+			HealthEndpoint:  "/health",
+			ReadinessEndpoint: "/ready",
+			LivenessEndpoint:  "/live",
+		},
+	}
+
+	// Create test logger
+	logger := zap.NewNop()
+
+	// Initialize database connection for test
+	dbCfg := database.Config{
+		Host:     cfg.Database.Host,
+		Port:     cfg.Database.Port,
+		User:     cfg.Database.User,
+		Password: cfg.Database.Password,
+		Name:     cfg.Database.Name,
+		SSLMode:  cfg.Database.SSLMode,
+	}
+
+	db, err := database.NewTestConnection(dbCfg)
+	if err != nil {
+		t.Skipf("database connection failed, skipping integration test: %v", err)
+	}
+
+	// Clean up and migrate test database
+	if err := database.ResetTestDatabase(db); err != nil {
+		t.Fatalf("failed to reset test database: %v", err)
+	}
+
+	// Create server
+	srv, err := server.NewServer(cfg, logger)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Start server in background
+	go func() {
+		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+			t.Errorf("server error: %v", err)
+		}
+	}()
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Return cleanup function
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		db.Close()
+	}
+
+	return srv, db, cleanup
+}
+
+// TestAgentLifecycle tests the full agent lifecycle (create, start, stop, delete)
+func TestAgentLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv, db, cleanup := SetupIntegrationTest(t)
+	defer cleanup()
+
+	// Test data
+	agentData := `{
+		"name": "test-agent-1",
+		"image": "busybox:latest",
+		"runtime": "containerd",
+		"command": ["sleep", "300"],
+		"env": ["TEST_ENV=value"],
+		"labels": {"test": "true"}
+	}`
+
+	// 1. Create agent
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents", 
+		bytes.NewBufferString(agentData))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d: %s", 
+			createRec.Code, createRec.Body.String())
+	}
+
+	// Extract agent ID from response
+	var createResp map[string]interface{}
+	// In real test, parse JSON response
+	t.Logf("Create response: %s", createRec.Body.String())
+
+	// 2. List agents
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	listRec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Errorf("expected status 200 for list, got %d", listRec.Code)
+	}
+
+	// 3. Get agent details
+	// TODO: Extract agent ID and test GET endpoint
+
+	// 4. Start agent (if supported)
+	// 5. Stop agent (if supported)
+	// 6. Delete agent
+
+	// Verify database state
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE name = $1", 
+		"test-agent-1").Scan(&count)
+	if err != nil {
+		t.Errorf("database query failed: %v", err)
+	}
+
+	if count == 0 {
+		t.Error("agent not found in database after creation")
+	}
+}
+
+// TestAgentValidation tests input validation for agent creation
+func TestAgentValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv, _, cleanup := SetupIntegrationTest(t)
+	defer cleanup()
+
+	testCases := []struct {
+		name       string
+		agentData  string
+		expectCode int
+	}{
+		{
+			name:       "missing name",
+			agentData:  `{"image": "busybox:latest"}`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "missing image",
+			agentData:  `{"name": "test-agent"}`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid runtime",
+			agentData:  `{"name": "test", "image": "busybox", "runtime": "invalid"}`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "valid request",
+			agentData:  `{"name": "valid-agent", "image": "busybox:latest", "runtime": "containerd"}`,
+			expectCode: http.StatusCreated,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agents",
+				bytes.NewBufferString(tc.agentData))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != tc.expectCode {
+				t.Errorf("expected status %d, got %d: %s",
+					tc.expectCode, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestHealthEndpoints tests health monitoring endpoints
+func TestHealthEndpoints(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv, _, cleanup := SetupIntegrationTest(t)
+	defer cleanup()
+
+	endpoints := []string{
+		"/health",
+		"/ready",
+		"/live",
+		"/metrics",
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK && rec.Code != http.StatusServiceUnavailable {
+				t.Errorf("expected status 200 or 503 for %s, got %d",
+					endpoint, rec.Code)
+			}
+		})
+	}
+}
+
+// TestConcurrentAgentOperations tests concurrent agent operations
+func TestConcurrentAgentOperations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv, _, cleanup := SetupIntegrationTest(t)
+	defer cleanup()
+
+	const numWorkers = 5
+	errors := make(chan error, numWorkers)
+
+	for i := 0; i < numWorkers; i++ {
+		go func(workerID int) {
+			agentData := fmt.Sprintf(`{
+				"name": "concurrent-agent-%d",
+				"image": "busybox:latest",
+				"runtime": "containerd",
+				"command": ["sleep", "10"]
+			}`, workerID)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agents",
+				bytes.NewBufferString(agentData))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				errors <- fmt.Errorf("worker %d: expected 201, got %d", workerID, rec.Code)
+			} else {
+				errors <- nil
+			}
+		}(i)
+	}
+
+	// Collect results
+	for i := 0; i < numWorkers; i++ {
+		if err := <-errors; err != nil {
+			t.Error(err)
+		}
+	}
+}
