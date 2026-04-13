@@ -97,102 +97,56 @@ OpenOS is described as **five logical layers** plus an explicit **thin data laye
 
 ```mermaid
 flowchart TB
-    subgraph IF["Interface layer"]
-        direction LR
-        GW["API entry\nREST / gRPC / WebSocket"]
-        CLI["CLI"]
-        UI["Dashboard"]
-    end
+  subgraph cli [CLI]
+    aos["aos CLI\nbuild push pull run"]
+  end
 
-    subgraph OR["Orchestration layer"]
-        direction LR
-        WE["Workflow engine"]
-        DISC["Service discovery"]
-        BUS["Event bus\nNATS-first ADR"]
-    end
+  subgraph builder [BuilderLayer]
+    spec["Agentfile / spec"]
+    engine["Build Engine\nPlan Build Cache"]
+    aap["AAP Bundle\nmanifest + layers"]
+  end
 
-    subgraph AG["Agent layer"]
-        direction LR
-        RT["Agent runtime\nCRI-style"]
-        LM["Lifecycle manager"]
-        REG["Agent registry"]
-    end
+  subgraph registry [Registry]
+    localReg["LocalRegistry"]
+    httpReg["HTTPRegistry"]
+  end
 
-    subgraph PL["Platform layer"]
-        direction LR
-        SCH["Resource scheduler"]
-        SEC["Security enforcer\nOPA-class"]
-        NET["Network manager"]
-    end
+  subgraph kernel [AgentKernel]
+    proc["Process / Namespace"]
+    mem["Memory / Checkpoint"]
+    vfs["VFS"]
+    ipc["IPC"]
+  end
 
-    subgraph CS["Core services layer"]
-        direction LR
-        STG["Storage\nPG Redis S3-class"]
-        MSG["Messaging\nNATS Kafka-class"]
-        OBS["Monitoring\nPrometheus-class"]
-    end
+  subgraph runtime [Runtime]
+    facade["RuntimeFacade"]
+    backends["containerd / gVisor / Kata"]
+  end
 
-    IF --> OR --> AG --> PL --> CS
-```
+  subgraph control [ControlPlane]
+    api["Server / API"]
+  end
 
-### Thin data layer and persistence (east–west)
+  aos --> spec
+  spec --> engine
+  engine --> aap
+  aos --> localReg
+  aos --> httpReg
+  aap --> localReg
+  aap --> httpReg
+  localReg --> aap
+  httpReg --> aap
 
-```mermaid
-flowchart LR
-    subgraph APP["Application and orchestration"]
-        API["Handlers workflows"]
-    end
+  aos -->|"run"| facade
+  aap -->|"LoadPackage"| facade
+  facade --> backends
+  facade --> proc
+  facade --> mem
 
-    subgraph TDL["Thin data layer in-process"]
-        direction TB
-        REPO["Repository"]
-        UOW["Unit of Work"]
-        OB["Outbox"]
-        SCHM["Schema registry"]
-        MIG["Migrations"]
-    end
+  api -.-> kernel
+  api -.-> runtime
 
-    subgraph DB["Database"]
-        PG[("PostgreSQL metadata state")]
-    end
-
-    subgraph BUS["Async delivery"]
-        NATS[["NATS JetStream"]]
-    end
-
-    API --> REPO
-    API --> UOW
-    UOW --> REPO
-    UOW --> OB
-    OB --> PG
-    REPO --> PG
-    SCHM --> REPO
-    MIG --> PG
-    OB -.->|"publish"| NATS
-```
-
-### Dual paths: control plane vs consistency outbox
-
-```mermaid
-flowchart TB
-    subgraph CP["Control-plane states excerpt"]
-        direction LR
-        C1["Created"] --> C2["Scheduled"]
-        C2 --> C3["Starting"]
-        C3 --> C4["Ready"]
-        C3 --> failedNode["Failed"]
-    end
-
-    subgraph CC["Consistency outbox states"]
-        direction LR
-        S1["Persisted"] --> S2["OutboxWritten"]
-        S2 --> S3["Published"]
-        S3 --> S4["Acknowledged"]
-        S3 --> replayNode["Replay DLQ"]
-    end
-
-    C2 -.->|"persist before schedule commit"| S1
-    C4 -.->|"Ready requires Published-class state"| S3
 ```
 
 ---
@@ -290,12 +244,19 @@ SLI/SLO examples (targets, not guarantees until measured in your deployment): ag
 
 ---
 
-## Roadmap (high level)
+## Added:
 
-- Harden **production** paths: end-to-end agent lifecycle on real infrastructure, continuous SLO evidence.
-- Evolve **gateway** from in-process HTTP toward **Envoy + control plane** where justified.
-- Deepen **scheduler and policy** (resources, quotas, OPA) with audited defaults.
-- Expand **observability** (metrics/traces/logs) to match the field requirements in architecture docs.
+- Agent construction / assembly / customization.
+
+- System core runtime abstraction.
+
+- Standardized Agent delivery – similar to Docker image-based container delivery.
+
+- Reusable Agent components – template inheritance + dependency reuse.
+
+- CI/CD integration – Agent builds can be integrated into DevOps pipelines.
+
+- Version management – versioned and traceable Agent artifacts.
 
 ---
 
