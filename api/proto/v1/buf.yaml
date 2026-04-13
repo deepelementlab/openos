@@ -1,0 +1,5 @@
+version: v1
+# Well-known types are vendored under google/protobuf/ in this module.
+breaking:
+  use:
+    - FILE

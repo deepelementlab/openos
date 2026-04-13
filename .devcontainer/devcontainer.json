@@ -1,0 +1,20 @@
+{
+  "name": "AOS Development",
+  "image": "mcr.microsoft.com/devcontainers/go:1.22",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "go mod download",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ],
+      "settings": {
+        "go.testFlags": ["-v"],
+        "go.lintTool": "golangci-lint"
+      }
+    }
+  },
+  "forwardPorts": [8080, 9090, 4222]
+}

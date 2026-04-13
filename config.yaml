@@ -1,0 +1,25 @@
+# AOS / OpenOS — 默认本地配置（可直接启动）
+# 更全量示例见 configs/config.yaml；复制本文件可参考 config.yaml.template
+#
+mode: development
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+  mode: release
+  graceful_shutdown_timeout: 30
+
+container:
+  runtime: containerd
+
+scheduler:
+  algorithm: round_robin
+
+agent:
+  restart_policy: on-failure
+
+storage:
+  local_path: "./data/aos-storage"
+
+messaging:
+  enabled: false
