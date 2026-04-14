@@ -135,8 +135,6 @@ AOS combines **declarative agent packages** (build → registry) with **runtime 
 
 ## System Architecture
 
-OpenOS is described as **five logical layers** plus an explicit **thin data layer** and **dual state machines** (control vs. consistency). Diagrams render on GitHub (Mermaid).
-
 ```mermaid
 flowchart TB
   subgraph cli [CLI]
