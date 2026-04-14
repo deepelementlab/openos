@@ -5,6 +5,12 @@
 <h1 align="center">OpenOS</h1>
 
 <p align="center">
+  <strong>An agent-native operating system for the AI era.
+    Come join us — let's explore and push boundaries together.
+  </strong>
+</p>
+
+<p align="center">
   <a href="https://github.com/deepelementlab/clawcode/releases">
    <img
      src="https://img.shields.io/static/v1?style=flat&label=release&labelColor=6A737D&color=fe7d37&message=v0.1.2"
