@@ -7,83 +7,76 @@
 <p align="center">
   <a href="https://github.com/deepelementlab/clawcode/releases">
    <img
-     src="https://img.shields.io/static/v1?style=flat&label=release&labelColor=6A737D&color=fe7d37&message=v0.1.0"
+     src="https://img.shields.io/static/v1?style=flat&label=release&labelColor=6A737D&color=fe7d37&message=v0.1.2"
      alt="Release v0.1.2"
    />
   </a>
   <a href="#license"><img src="https://img.shields.io/badge/license-GPL%20OR%20Apache%202.0-blue.svg" alt="License: GPL-3.0" /></a>
 </p>
 
-**System goal:** realize **AOS** — an **Agent Operating System** — the layer that gives autonomous software agents the same primitives a classical OS gives processes: **lifecycle, isolation, scheduling, namespaces for tenancy, messaging, and observability**, exposed primarily through **APIs**, not GUIs.
+OpenOS aims to build an open AOS (Agent Operating System) that provides a complete closed loop — from definition to runtime — for long-running agent workloads, supporting the entire lifecycle from development and delivery to production operations.
 
 <img width="2575" height="1203" alt="Screenshot - 2026-04-13 00 02 21" src="https://github.com/user-attachments/assets/03ad3492-a5a5-49e7-b893-c6d3c4011d6b" />
 
+AOS separates the agent lifecycle into two evolvable tracks—build & distribution and run & management—and joins them with a single, portable artifact: the Agent Package (AAP).
 
-**What “AOS” means:** **AOS** abbreviates **Agent Operating System** — the architectural north star of treating **agents** as first-class units (create, schedule, run, recover, retire) with **consistent persistence and events** (for example outbox-style delivery) so behavior stays explainable under failure. **OpenOS** is the open project and codebase that implements this AOS vision.
+**1. Engineering-friendly construction of Agent artifacts**
+Using a declarative Agentfile to describe metadata, build steps, and multi-stage builds, developers can produce standardized AAP (Agent Package) via the aos build command. With aos push / aos pull and local or HTTP registries, teams can manage versioning and distribution. The system supports dependency declaration, package signing, and other mechanisms, enabling agent applications to be built, published, and traced just like cloud-native artifacts.
 
-**The control plane for long-running AI agents** — not a chat wrapper. OpenOS is an **API-first, cloud-native runtime layer** that treats agents like the OS treats processes: **lifecycle, isolation, scheduling, multi-tenancy, events, and observability** under one contract.
-
-- **Agent-native** — Built for agents that run 24/7, call APIs, and coordinate over messages—not for point-and-click GUIs.
-- **Honest architecture** — Extensive design docs (SLOs, ADRs, compatibility matrix, thin data layer) plus a **Go reference implementation** you can build and test today.
-- **Production-minded** — Dual state machines (control plane + outbox), idempotent APIs, tenant quotas, NATS-oriented messaging, and tests from unit to e2e.
-
----
-
-## What OpenOS is — and is not
-
-| OpenOS **is** | OpenOS **is not** |
-|-----------------|---------------------|
-| Infrastructure to **run, schedule, and isolate** agents with a real control plane | A single-model **LLM SDK** or prompt toolkit |
-| A **layered platform** (interface → orchestration → agent runtime → platform → core services) | A hosted SaaS product (this repo is **code + specs**) |
-| A place to attach **gRPC/HTTP**, **PostgreSQL**, **NATS**, **container runtimes** | A finished “drop in prod with zero ops” appliance |
+**2. Unified runtime and management environment**
+Based on the RuntimeFacade that interfaces with runtimes such as containerd, gVisor, and Kata, combined with the Agent Kernel's abstractions over process groups, namespaces, memory and checkpoints, VFS, IPC, and more — along with the aos run command and control plane services — OpenOS provides management capabilities for starting, isolating, lifecycle, and observability of agents. This allows both "packages" and "running instances" to be operated under a unified semantic model.
 
 ---
 
-## Why OpenOS exists
+## Design philosophy
 
-Traditional stacks assume **human-driven** sessions. Agents need **continuous execution**, **predictable resources**, **strong isolation**, and **machine-readable contracts**. Teams stitching together ad-hoc scripts, containers, and queues hit the same walls: **no unified lifecycle**, **weak tenant boundaries**, **inconsistent retries**, and **no shared observability model**.
+We define what the package is first, then how it runs. The package (manifest + layers + mapping rules) bridges build-time and run-time instead of hard-coding build steps into process isolation or vice versa.
 
-OpenOS answers with:
 
-1. **One lifecycle model** — From create → schedule → start → ready/fail, with compensation paths spelled out.
-2. **One consistency story** — Persisted state + outbox-style delivery so “published” means something under failure.
-3. **One front door** — REST/gRPC/WebSocket direction with shared errors, idempotency, and versioning (see architecture docs).
-4. **Multi-tenancy by design** — Tenant context, quotas, and interceptors on the API path (where implemented).
-5. **Ops you can reason about** — SLI/SLO targets, error budgets, and CI data gates documented—not an afterthought.
+| Track |       Intent        |  Examples |
+|-------|---------------------|-----------|
+| **Build & distribution** | Turn an agent application into a versioned, addressable, reusable unit | internal/builder/spec, engine (Plan / Build, multi-stage & DAG), registry (local / HTTP), deps |
+| **Run & management** | Run agents as isolated, kernel-aware workloads on mainstream runtimes | pkg/runtime/facade, internal/kernel (process / memory / vfs / ipc), cmd/aos run, internal/server and control-plane packages |
+
+### Build & distribution
+#### Declarative first
+The Agentfile (JSON/YAML) carries apiVersion, metadata, steps/stages, dependencies, etc. The build plan is derived from spec → Plan, not hardcoded in the CLI.
+
+**Implementation:** internal/builder/spec defines the schema; engine.Plan / PlanMultiStage, topological sorting, and parallel stages translate "intent" into computable, cacheable layer hashes and stage digests.
+
+**Core Idea:** Agent deliverables should be reviewable, diffable, and CI-integratable, drawing a clear line from "ad-hoc scripting."
+
+#### Package as Contract
+The output is an AAP (manifest.json, layers.json, etc.). Together with Registry push/pull, the "single source of truth" within a team becomes the artifact + version, not a directory on some machine.
+
+**Implementation:** engine.WriteLocalAAP, registry.LocalRegistry / HTTPRegistry, LoadAgentPackage.
+
+**Core Idea:** Operations and collaboration are bounded by artifacts; the runtime environment only consumes the contract and does not re-implement build logic.
 
 ---
 
 ## Key capabilities
 
-The Go module under `agent-os/implementation` (`github.com/agentos/aos`, Go **1.22+**) includes:
-
-| Area | What you will find |
-|------|---------------------|
-| **CLI & process** | Cobra-based **`aos`** binary: config path (`-c`/`--config`, default `config.yaml`), debug flag, graceful shutdown. |
-| **HTTP control plane** | Server package with health/metrics-style endpoints and middleware; baseline for MVP gateway (ADR: in-process first, Envoy as target). |
-| **gRPC** | Agent and tenant services, protobuf v1 APIs, interceptors for **auth**, **tenant**, **quota**, **metrics** (see `api/grpc`, `api/proto`). |
-| **Agent runtime** | CRI-style abstractions; **containerd** integration; **gVisor** / **Kata** packages and tests toward sandboxed execution. |
-| **Orchestration** | Workflow engine, **saga** coordinator, state machine transitions, compensation paths—**with tests**. |
-| **Discovery** | Registry-style discovery with **round-robin / least-conn / weighted** balancers and tests. |
-| **Scheduling** | Scheduler interfaces and **failover-oriented** scheduling code paths with tests. |
-| **Data & migrations** | PostgreSQL-oriented **migration manager**, connection pool/retry helpers, repositories (e.g. agent, tenant), extended data repository patterns. |
-| **Messaging** | NATS client wrappers, publisher/subscriber, routing, serde, deliverer—**with tests**. |
-| **Security hooks** | OPA client scaffolding and policy-oriented tests (policy as code direction). |
-| **Quality** | `go test` across packages; **race** in Makefile test targets; **benchmarks** (`test/benchmarks`); **smoke** and **e2e** tests. |
-
----
-
-## Status at a glance
-
-Rough classification for expectations (always check the code for ground truth):
-
-| Tier | Examples |
-|------|----------|
-| **Shipped in tree** | CLI, HTTP server skeleton, gRPC surfaces + interceptors, DB migrations/pool, NATS messaging packages, orchestration workflow/saga tests, discovery balancers, runtime packages (containerd/gVisor/Kata paths), benchmarks, e2e/smoke tests. |
-| **In progress** | Full production hardening, end-to-end story for every API on real clusters, complete scheduler policies, universal OPA rollout. |
-| **Planned / target** | Envoy-class gateway control plane, Temporal/Argo-class external workflow engine if adopted, Kafka for selected high-throughput streams, full SLO dashboards wired to releases. |
-
-**Current version label:** **v0.1.0** (see `VERSION` in [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile)).
+AOS combines **declarative agent packages** (build → registry) with **runtime and kernel-level execution**, so agents can be **packaged, distributed, and run** under a consistent control-plane model.
+| Area | Capability | What you get (implementation-backed) |
+|------|------------|----------------------------------------|
+| **CLI** | Unified `aos` tool | `build`, `push`, `pull`, `run` (plus `server` and other commands under `cmd/aos`) for artifact and control-plane workflows. |
+| **Agent packages** | Declarative **Agentfile** | JSON/YAML manifests (`internal/builder/spec`): metadata, `steps`, multi-stage **`stages`**, `from` / `dependsOn`, dependencies, config, entrypoint. |
+| **Build engine** | Plan → build → AAP | Content-addressable layer digests, **multi-stage** plans, **DAG**-ordered stages with parallel hooks (`internal/builder/engine`). Output **AAP** layout (`manifest.json`, `layers.json`, …). |
+| **Build cache** | Layer cache | Filesystem-backed **layer cache** with sharded paths and pruning (`LayerCache` in `internal/builder/engine`). |
+| **Checkpoints (build path)** | Kernel-integrated metadata | Optional **memory checkpoint** IDs attached to cache metadata when using kernel test/build hooks (`checkpoint.go`, `MemoryManager`). |
+| **Registry** | Local registry | File-based store and index under a root directory (`internal/builder/registry`). |
+| **Registry** | HTTP registry | Push/pull over HTTP with optional **Bearer** token (`HTTPRegistry` in `internal/builder/registry/remote.go`). |
+| **Trust** | Package signing | **Ed25519** sign/verify and `signature.json` sidecar (`internal/builder/registry/crypto.go`). |
+| **Dependencies** | Resolver | In-memory resolution of `DependencySpec` (agents with `ref`, services, volumes) (`internal/builder/deps`). |
+| **Runtime facade** | Single entry to runtimes | **`RuntimeFacade`**: backend selection, `Connect`, `CreateAgent`, `StartAgent`, optional **`WithKernel`** (`pkg/runtime/facade`). |
+| **Runtime backends** | Pluggable runtimes | **containerd**, **gVisor**, **Kata** packages under `pkg/runtime/` with shared `interfaces` and `types`. |
+| **Agent mapping** | AAP → `AgentSpec` | **`AgentSpecFromPackage`** maps manifest to `types.AgentSpec` for create/start (`pkg/runtime/facade/package.go`). |
+| **Agent kernel** | OS-style primitives | **Process** (groups, namespaces), **memory** (regions, checkpoint/restore stubs), **VFS**, **IPC** (`internal/kernel/*`), aggregated by **`kernel.Facade`**. |
+| **Control plane** | HTTP & gRPC APIs | Server wiring (`internal/server`), **gRPC** services and **protobuf** under `api/grpc` and `api/proto`, optional **gRPC-Gateway**. |
+| **Platform features** | Multi-tenant & ops | Scheduling, orchestration, messaging (e.g. **NATS**), discovery, tenant/quota, observability hooks—see `internal/` subsystems (aligned with `go.mod` dependencies). |
+| **Persistence & cache** | Data stack | **PostgreSQL** (`lib/pq`, `sqlx`), **Redis**, storage abstractions (`internal/database`, `internal/storage`). |
+| **CI & quality** | Automation | **GitHub Actions**, tests with race detector and coverage, optional **Codecov**; scripts for **key-package coverage** (`scripts/coverage-key-packages.sh` / `.ps1`). |
 
 ---
 
@@ -159,58 +152,9 @@ flowchart TB
 
 ---
 
-## Tech stack (reference)
-
-| Layer | Technologies |
-|--------|----------------|
-| Language | **Go** 1.22+ |
-| APIs | **gRPC**, **grpc-gateway** (optional REST bridge), HTTP (`net/http` / server package) |
-| Data | **PostgreSQL** (sqlx), **Redis** client present for cache/session style configs |
-| Messaging | **NATS** (`nats.go`) |
-| Runtime | **containerd**, **gVisor**, **Kata** directions in tree |
-| Observability | Zap logging; Prometheus-style hooks in design docs |
-| CLI | **Cobra**, **Viper** |
-
----
-
-## Quick start
-
-From the **implementation** module:
-
-```bash
-cd agent-os/implementation
-go mod download
-make build          # output: bin/aos
-```
-
-Run with the sample config (adjust DB/Redis/NATS to your environment):
-
-```bash
-./bin/aos --config configs/config.yaml
-# or: go run ./cmd/aos --config configs/config.yaml
-```
-
-**Tests:**
-
-```bash
-# Full module test (recommended for contributors)
-go test -race ./...
-
-# Makefile shortcut (pkg + internal packages)
-make test
-```
-
-Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be available; if a test fails on connection, check env-specific `test` or `e2e` packages and your local services.
-
-**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`. See [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile).
-
----
-
 ## Repository layout
 
 ```text
-.
-implementation/
 ├── cmd/aos/                 # aos CLI: control-plane server, build, push, pull, run, etc.
 ├── api/                     # Public-facing API surface
 │   ├── gateway/             # HTTP gateway entry
@@ -285,6 +229,53 @@ implementation/
 ├── go.mod / go.sum          # Go module definition
 └── coverage*                # Local coverage artifacts (typically gitignored)
 ```
+
+---
+
+## Tech stack
+
+| Layer | Technologies |
+|--------|----------------|
+| Language | **Go** 1.22+ |
+| APIs | **gRPC**, **grpc-gateway** (optional REST bridge), HTTP (`net/http` / server package) |
+| Data | **PostgreSQL** (sqlx), **Redis** client present for cache/session style configs |
+| Messaging | **NATS** (`nats.go`) |
+| Runtime | **containerd**, **gVisor**, **Kata** directions in tree |
+| Observability | Zap logging; Prometheus-style hooks in design docs |
+| CLI | **Cobra**, **Viper** |
+
+---
+
+## Quick start
+
+From the **implementation** module:
+
+```bash
+cd agent-os/implementation
+go mod download
+make build          # output: bin/aos
+```
+
+Run with the sample config (adjust DB/Redis/NATS to your environment):
+
+```bash
+./bin/aos --config configs/config.yaml
+# or: go run ./cmd/aos --config configs/config.yaml
+```
+
+**Tests:**
+
+```bash
+# Full module test (recommended for contributors)
+go test -race ./...
+
+# Makefile shortcut (pkg + internal packages)
+make test
+```
+
+Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be available; if a test fails on connection, check env-specific `test` or `e2e` packages and your local services.
+
+**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`. See [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile).
 
 ---
 
