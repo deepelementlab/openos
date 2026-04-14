@@ -16,7 +16,7 @@
 
 OpenOS aims to build an open AOS (Agent Operating System) that provides a complete closed loop — from definition to runtime — for long-running agent workloads, supporting the entire lifecycle from development and delivery to production operations.
 
-<img width="2295" height="1100" alt="Screenshot - 2026-04-14 14 48 22" src="https://github.com/user-attachments/assets/d9449cd5-a31a-45a3-b152-926a8145f3f1" />
+<img width="2341" height="1184" alt="Screenshot - 2026-04-14 15 31 03" src="https://github.com/user-attachments/assets/dbc96905-a6b0-4db1-a530-52949e9c39c8" />
 
 AOS separates the agent lifecycle into two evolvable tracks—build & distribution and run & management—and joins them with a single, portable artifact: the Agent Package (AAP).
 
@@ -370,6 +370,8 @@ chmod +x agent-os/scripts/publish-implementation.sh   # once
 ./agent-os/scripts/publish-implementation.sh /path/to/release
 # Optional: -c (clean target subtree), -p (keep implementation/ parent folder)
 ```
+
+<img width="2365" height="871" alt="Screenshot - 2026-04-14 15 25 50" src="https://github.com/user-attachments/assets/2926990c-6cd3-4f5e-9027-0701395d11ae" />
 
 ---
 
