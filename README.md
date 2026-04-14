@@ -53,7 +53,7 @@ OpenOS answers with:
 
 ---
 
-## Key capabilities (implementation + design)
+## Key capabilities
 
 The Go module under `agent-os/implementation` (`github.com/agentos/aos`, Go **1.22+**) includes:
 
@@ -71,8 +71,6 @@ The Go module under `agent-os/implementation` (`github.com/agentos/aos`, Go **1.
 | **Security hooks** | OPA client scaffolding and policy-oriented tests (policy as code direction). |
 | **Quality** | `go test` across packages; **race** in Makefile test targets; **benchmarks** (`test/benchmarks`); **smoke** and **e2e** tests. |
 
-**Thin data layer (design):** repositories, Unit of Work, outbox, schema registry, and migrations—without a separate “data microservice” in early phases. See [`agent-os/architecture/data-layer-blueprint.md`](agent-os/architecture/data-layer-blueprint.md).
-
 ---
 
 ## Status at a glance
@@ -89,11 +87,9 @@ Rough classification for expectations (always check the code for ground truth):
 
 ---
 
-## Architecture at a glance
+## System Architecture
 
 OpenOS is described as **five logical layers** plus an explicit **thin data layer** and **dual state machines** (control vs. consistency). Diagrams render on GitHub (Mermaid).
-
-### Logical layers (north–south)
 
 ```mermaid
 flowchart TB
@@ -151,7 +147,7 @@ flowchart TB
 
 ---
 
-## Design principles (short)
+## Design principles
 
 1. **API-first** — OpenAPI/gRPC-friendly contracts, unified errors, idempotency keys, `/api/v1/...` style versioning.
 2. **Agent-centric** — Schedulers and lifecycle follow agents, not interactive users.
@@ -214,33 +210,81 @@ Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be avail
 
 ```text
 .
-├── README.md                 # This file
-└── agent-os/
-    ├── architecture/       # System + technical architecture, SLOs, CI gates, ADRs, compatibility matrix
-    ├── technical-design/     # API specs, deep design, database schema notes
-    ├── implementation/       # Go module: cmd/, internal/, api/, pkg/, configs/, test/
-    ├── product-vision.md     # Product definition
-    └── …                     # Planning, business, archive docs
+implementation/
+├── cmd/aos/                 # aos CLI: control-plane server, build, push, pull, run, etc.
+├── api/                     # Public-facing API surface
+│   ├── gateway/             # HTTP gateway entry
+│   ├── grpc/                # gRPC services and generated protobuf code (pb)
+│   ├── proto/               # Protobuf definitions and buf configuration
+│   ├── handlers/            # HTTP/gRPC handlers
+│   ├── middleware/          # Cross-cutting concerns (auth, tenant, audit, …)
+│   ├── auth/                # API-layer authentication helpers
+│   ├── models/              # Request/response models
+│   ├── routes/              # Route registration
+│   └── specs/               # API specifications (e.g. OpenAPI)
+├── internal/                # Non-exported application and domain logic
+│   ├── server/              # HTTP server wiring, routing, middleware stack
+│   ├── config/              # Configuration loading
+│   ├── agent/               # Agent lifecycle and related logic
+│   ├── scheduler/           # Scheduling (affinity, algorithms, failover, …)
+│   ├── orchestration/       # Workflows, sagas, state machines
+│   ├── messaging/           # Messaging, NATS integration, event bus
+│   ├── discovery/           # Service discovery and load balancing
+│   ├── tenant/              # Multi-tenancy and quotas
+│   ├── database/            # DB connectivity, migrations, retries
+│   ├── storage/             # Storage abstractions
+│   ├── auth/                # Internal token and auth utilities
+│   ├── security/            # Policy (e.g. OPA), supply chain, …
+│   ├── monitoring/          # Metrics and observability helpers
+│   ├── observability/tracing/  # Distributed tracing
+│   ├── health/              # Health aggregation
+│   ├── resource/            # Resource management
+│   ├── network/             # Network policy
+│   ├── deployment/          # Deployment pipeline–related logic
+│   ├── federation/          # Federation / registry-style extensions
+│   ├── resilience/          # Probes and resilience patterns
+│   ├── slo/                 # SLO-related logic
+│   ├── autoscaling/         # Autoscaling
+│   ├── capacity/            # Capacity planning
+│   ├── prediction/          # Fault prediction and related analytics
+│   ├── governance/          # Billing and governance-style concerns
+│   ├── edge/                # Edge-oriented extensions / placeholders
+│   ├── ml/                  # ML-oriented extensions / placeholders
+│   ├── validation/          # Stress/validation utilities
+│   ├── audit/               # Auditing
+│   ├── data/                # Internal data helpers
+│   ├── version/             # Build/version metadata
+│   ├── kernel/              # Agent kernel: process, memory, vfs, ipc
+│   └── builder/             # Agent packages: spec, engine, registry, deps, integration tests
+├── pkg/                     # Importable libraries (stable API intent varies by package)
+│   ├── runtime/             # Container runtime abstraction and backends
+│   │   ├── facade/          # RuntimeFacade (unified entry, AAP mapping helpers)
+│   │   ├── interfaces/      # Runtime interfaces
+│   │   ├── types/           # Shared runtime types
+│   │   ├── containerd/      # containerd backend
+│   │   ├── gvisor/          # gVisor backend
+│   │   ├── kata/            # Kata backend
+│   │   ├── sandbox/         # Sandbox and network isolation
+│   │   ├── lifecycle/       # Lifecycle hooks
+│   │   └── resource/        # Runtime resource enforcement
+│   └── packaging/           # Manifest and packaging helpers
+├── test/                    # Cross-package tests
+│   ├── integration/         # Integration tests
+│   ├── e2e/                 # End-to-end tests
+│   ├── smoke/               # Smoke tests
+│   ├── benchmarks/          # Benchmarks
+│   └── data/                # Test fixtures
+├── scripts/                 # Tooling (e.g. coverage helpers)
+├── configs/                 # Sample or default configuration
+├── docs/                    # Documentation (including OpenAPI assets)
+├── sdk/go/                  # Go client SDK (or stubs)
+├── data/                    # Local/sample data directories
+├── bin/                     # Build output directory (when present)
+├── .github/                 # CI workflows and composite actions (e.g. build-agent)
+├── .devcontainer/           # Dev container configuration
+├── go.mod / go.sum          # Go module definition
+└── coverage*                # Local coverage artifacts (typically gitignored)
 ```
-
----
-
-## Documentation map
-
-| Topic | Location |
-|--------|----------|
-| System overview | [`agent-os/architecture/system-architecture.md`](agent-os/architecture/system-architecture.md) |
-| Detailed technical architecture | [`agent-os/architecture/tech-architecture.md`](agent-os/architecture/tech-architecture.md) |
-| API compatibility (REST/gRPC/WS) | [`agent-os/architecture/api-compatibility-matrix.md`](agent-os/architecture/api-compatibility-matrix.md) |
-| SLOs and release gates | [`agent-os/architecture/slo-release-gate.md`](agent-os/architecture/slo-release-gate.md) |
-| CI data gates | [`agent-os/architecture/ci-data-gates.md`](agent-os/architecture/ci-data-gates.md) |
-| Product summary | [`agent-os/summary-overview.md`](agent-os/summary-overview.md) |
-
----
-
-## Reliability and shipping (documented targets)
-
-SLI/SLO examples (targets, not guarantees until measured in your deployment): agent start success and latency, API error rate, outbox delivery success, event ACK latency—with **error budget** rules tying breaches to release policy. Data-related releases add migration safety, schema compatibility, and idempotency tests. See the SLO and CI gate documents linked above.
 
 ---
 
