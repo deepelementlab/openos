@@ -127,8 +127,6 @@ AOS combines **declarative agent packages** (build → registry) with **runtime 
 
 ## System Architecture
 
-OpenOS is described as **five logical layers** plus an explicit **thin data layer** and **dual state machines** (control vs. consistency). Diagrams render on GitHub (Mermaid).
-
 ```mermaid
 flowchart TB
   subgraph cli [CLI]
@@ -320,7 +318,7 @@ make test
 
 Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be available; if a test fails on connection, check env-specific `test` or `e2e` packages and your local services.
 
-**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`. See [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile).
+**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`.
 
 ---
 
