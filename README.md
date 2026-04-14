@@ -14,6 +14,8 @@
   <a href="#license"><img src="https://img.shields.io/badge/license-GPL%20OR%20Apache%202.0-blue.svg" alt="License: GPL-3.0" /></a>
 </p>
 
+**English** | [简体中文](README.zh-CN.md)
+
 OpenOS aims to build an open AOS (Agent Operating System) that provides a complete closed loop — from definition to runtime — for long-running agent workloads, supporting the entire lifecycle from development and delivery to production operations.
 
 <img width="2341" height="1184" alt="Screenshot - 2026-04-14 15 31 03" src="https://github.com/user-attachments/assets/dbc96905-a6b0-4db1-a530-52949e9c39c8" />
