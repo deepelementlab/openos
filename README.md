@@ -33,32 +33,32 @@ Based on the RuntimeFacade that interfaces with runtimes such as containerd, gVi
 We define what the package is first, then how it runs. The package (manifest + layers + mapping rules) bridges build-time and run-time instead of hard-coding build steps into process isolation or vice versa.
 
 
-|    Track   |       Intent        |  Examples |
-|------------|---------------------|-----------|
-| **Build & distribution** | Turn an agent application into a versioned, addressable, reusable unit | internal/builder/spec, engine (Plan / Build, multi-stage & DAG), registry (local / HTTP), deps |
-| **Run & management** | Run agents as isolated, kernel-aware workloads on mainstream runtimes | pkg/runtime/facade, internal/kernel (process / memory / vfs / ipc), cmd/aos run, internal/server and control-plane packages |
+|       Track       |       Intent        |  Examples |
+|-------------------|---------------------|-----------|
+| **Build & Distribution** | Turn an agent application into a versioned, addressable, reusable unit | internal/builder/spec, engine (Plan / Build, multi-stage & DAG), registry (local / HTTP), deps |
+| **Run & Management** | Run agents as isolated, kernel-aware workloads on mainstream runtimes | pkg/runtime/facade, internal/kernel (process / memory / vfs / ipc), cmd/aos run, internal/server and control-plane packages |
 
 ### 1. Build & distribution
-#### Declarative first
+#### (a). Declarative first
 The Agentfile (JSON/YAML) carries apiVersion, metadata, steps/stages, dependencies, etc. The build plan is derived from spec → Plan, not hardcoded in the CLI.
 
 **Implementation:** internal/builder/spec defines the schema; engine.Plan / PlanMultiStage, topological sorting, and parallel stages translate "intent" into computable, cacheable layer hashes and stage digests.
 
 **Core Idea:** Agent deliverables should be reviewable, diffable, and CI-integratable, drawing a clear line from "ad-hoc scripting."
 
-#### Package as Contract
+#### (b). Package as Contract
 The output is an AAP (manifest.json, layers.json, etc.). Together with Registry push/pull, the "single source of truth" within a team becomes the artifact + version, not a directory on some machine.
 
 **Implementation:** engine.WriteLocalAAP, registry.LocalRegistry / HTTPRegistry, LoadAgentPackage.
 
 **Core Idea:** Operations and collaboration are bounded by artifacts; the runtime environment only consumes the contract and does not re-implement build logic.
 
-#### Security and Trust Boundary (Optional but Structured)
+#### (c). Security and Trust Boundary (Optional but Structured)
 Signatures (e.g., registry/crypto, signature.json) incorporate provenance and integrity into the same artifact model, rather than as an afterthought.
 
 **Core Idea:** The trust chain between distribution and production is productized, not relying solely on network isolation.
 
-#### Content-Addressable Layers
+#### (d). Content-Addressable Layers
 Layer hashing, cache directories (e.g., LayerCache), multi-stage From / dependsOn are consistent with the intuition of multi-stage builds + layer reuse for container images.
 
 **Implementation:** Computing digests per step/stage in the engine, DAG parallel execution hooks, caching metadata (including extension points for linking with Kernel checkpoints).
@@ -66,7 +66,7 @@ Layer hashing, cache directories (e.g., LayerCache), multi-stage From / dependsO
 **Core Idea:** Build acceleration and reproducibility depend on hashable units, not on the state of a specific builder machine.
 
 ### 2. Run & management
-#### Runtime vs. Kernel Layering
+#### (a). Runtime vs. Kernel Layering
 RuntimeFacade is responsible for interfacing with the "container/sandbox world" (e.g., containerd, gVisor, Kata) via CreateAgent, StartAgent, etc.
 
 Kernel Facade is responsible for "Agent OS semantics" like process groups, namespaces, memory regions & checkpoints, VFS, IPC, decoupled from concrete container implementations.
@@ -75,16 +75,27 @@ Kernel Facade is responsible for "Agent OS semantics" like process groups, names
 
 **Core Idea:** The container runtime solves "how to run a container"; the Kernel layer expresses "how an agent is managed as a system resource." The two are composed, not merged into a monolithic runtime blob.
 
-#### Single Entrypoint, Multiple Backends (Facade + Pluggable Backends)
+#### (b). Single Entrypoint, Multiple Backends (Facade + Pluggable Backends)
 The runtime uses a factory + interface (interfaces.Runtime) to switch implementations; the CLI/API side converges call paths through the Facade.
 
 **Core Idea:** Replaceable backends and testability (e.g., mock/noop also exist in paths like gRPC) prevent the control plane from binding to any vendor-specific runtime.
 
-#### Explicit Mapping from Package to Process (Explicit mapping from AAP to AgentSpec)
+#### (c). Explicit Mapping from Package to Process (Explicit mapping from AAP to AgentSpec)
 
 LoadAgentPackage + AgentSpecFromPackage (pkg/runtime/facade/package.go) maps the config/entrypoint from the manifest to types.AgentSpec, which is then passed to Connect / CreateAgent.
 
 **Core Idea:** Runtime parameters come from the artifact, avoiding implicit configuration guessing at runtime, which benefits auditing and reproducibility.
+
+### 3. Closing the loop
+The path aos build → Registry → aos run (and the broader control plane) reflects a package-driven agent OS:
+
+- Build produces a unique artifact;
+
+- The Registry provides addressing and distribution;
+
+- Runtime consumes the same manifest and layers on the dual capabilities of the Kernel + Runtime.
+
+Building (defining + building + distributing) and running (isolation + lifecycle + observability) are designed to be symmetric, traceable, and automatable, delivering an "artifact-driven Agent OS."
 
 
 ---
