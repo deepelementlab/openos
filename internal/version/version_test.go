@@ -10,9 +10,9 @@ func TestGetVersion(t *testing.T) {
 	if v == "" {
 		t.Error("expected non-empty version")
 	}
-	// Default is "dev" when not set via ldflags
-	if v != "dev" {
-		t.Errorf("expected 'dev', got '%s'", v)
+	// Default semver when not set via ldflags
+	if v != "0.1.2" {
+		t.Errorf("expected '0.1.2', got '%s'", v)
 	}
 }
 
@@ -21,8 +21,8 @@ func TestGetFullVersion(t *testing.T) {
 	if fv == "" {
 		t.Error("expected non-empty full version")
 	}
-	if !strings.Contains(fv, "dev") {
-		t.Error("expected full version to contain 'dev'")
+	if !strings.Contains(fv, "0.1.2") {
+		t.Error("expected full version to contain semver")
 	}
 	if !strings.Contains(fv, "commit:") {
 		t.Error("expected full version to contain 'commit:'")
@@ -34,8 +34,15 @@ func TestGetFullVersion(t *testing.T) {
 
 func TestGetFullVersionFormat(t *testing.T) {
 	fv := GetFullVersion()
-	expected := "dev (commit: unknown, built: unknown)"
+	expected := "0.1.2 (commit: unknown, built: unknown)"
 	if fv != expected {
 		t.Errorf("expected '%s', got '%s'", expected, fv)
+	}
+}
+
+func TestGetDisplayVersion(t *testing.T) {
+	d := GetDisplayVersion()
+	if d != "V0.1.2" {
+		t.Errorf("expected V0.1.2, got %q", d)
 	}
 }

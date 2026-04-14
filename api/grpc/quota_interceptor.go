@@ -44,7 +44,6 @@ func (q *QuotaInterceptor) WithEnabled(enabled bool) *QuotaInterceptor {
 	q.enabled = enabled
 	return q
 }
-}
 
 // UnaryInterceptor returns the unary interceptor
 func (q *QuotaInterceptor) UnaryInterceptor() grpc.UnaryServerInterceptor {

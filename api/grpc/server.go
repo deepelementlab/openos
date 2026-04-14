@@ -6,11 +6,13 @@ import (
 	"net"
 	"time"
 
+	"github.com/agentos/aos/api/grpc/pb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -50,38 +52,38 @@ type Server struct {
 	listener   net.Listener
 
 	// Services
-	agentService      AgentServiceServer
-	tenantService     TenantServiceServer
-	runtimeService    RuntimeServiceServer
-	monitoringService MonitoringServiceServer
+	agentService      pb.AgentServiceServer
+	tenantService     pb.TenantServiceServer
+	runtimeService    pb.RuntimeServiceServer
+	monitoringService pb.MonitoringServiceServer
 }
 
 // ServerOption is a functional option for Server
 type ServerOption func(*Server)
 
 // WithAgentService sets the agent service
-func WithAgentService(svc AgentServiceServer) ServerOption {
+func WithAgentService(svc pb.AgentServiceServer) ServerOption {
 	return func(s *Server) {
 		s.agentService = svc
 	}
 }
 
 // WithTenantService sets the tenant service
-func WithTenantService(svc TenantServiceServer) ServerOption {
+func WithTenantService(svc pb.TenantServiceServer) ServerOption {
 	return func(s *Server) {
 		s.tenantService = svc
 	}
 }
 
 // WithRuntimeService sets the runtime service
-func WithRuntimeService(svc RuntimeServiceServer) ServerOption {
+func WithRuntimeService(svc pb.RuntimeServiceServer) ServerOption {
 	return func(s *Server) {
 		s.runtimeService = svc
 	}
 }
 
 // WithMonitoringService sets the monitoring service
-func WithMonitoringService(svc MonitoringServiceServer) ServerOption {
+func WithMonitoringService(svc pb.MonitoringServiceServer) ServerOption {
 	return func(s *Server) {
 		s.monitoringService = svc
 	}
@@ -147,19 +149,19 @@ func NewServer(config ServerConfig, logger *zap.Logger, opts ...ServerOption) (*
 
 	// Register services
 	if s.agentService != nil {
-		RegisterAgentServiceServer(s.grpcServer, s.agentService)
+		pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 		logger.Info("registered AgentService")
 	}
 	if s.tenantService != nil {
-		RegisterTenantServiceServer(s.grpcServer, s.tenantService)
+		pb.RegisterTenantServiceServer(s.grpcServer, s.tenantService)
 		logger.Info("registered TenantService")
 	}
 	if s.runtimeService != nil {
-		RegisterRuntimeServiceServer(s.grpcServer, s.runtimeService)
+		pb.RegisterRuntimeServiceServer(s.grpcServer, s.runtimeService)
 		logger.Info("registered RuntimeService")
 	}
 	if s.monitoringService != nil {
-		RegisterMonitoringServiceServer(s.grpcServer, s.monitoringService)
+		pb.RegisterMonitoringServiceServer(s.grpcServer, s.monitoringService)
 		logger.Info("registered MonitoringService")
 	}
 
@@ -246,8 +248,12 @@ func (r *RecoveryInterceptor) UnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				method := ""
+				if info != nil {
+					method = info.FullMethod
+				}
 				r.logger.Error("panic recovered in unary handler",
-					zap.String("method", info.FullMethod),
+					zap.String("method", method),
 					zap.Any("panic", rec),
 				)
 				err = fmt.Errorf("internal server error")
@@ -262,8 +268,12 @@ func (r *RecoveryInterceptor) StreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		defer func() {
 			if rec := recover(); rec != nil {
+				method := ""
+				if info != nil {
+					method = info.FullMethod
+				}
 				r.logger.Error("panic recovered in stream handler",
-					zap.String("method", info.FullMethod),
+					zap.String("method", method),
 					zap.Any("panic", rec),
 				)
 			}
@@ -289,8 +299,12 @@ func (l *LoggingInterceptor) UnaryInterceptor() grpc.UnaryServerInterceptor {
 		resp, err := handler(ctx, req)
 		duration := time.Since(start)
 
+		method := ""
+		if info != nil {
+			method = info.FullMethod
+		}
 		fields := []zap.Field{
-			zap.String("method", info.FullMethod),
+			zap.String("method", method),
 			zap.Duration("duration", duration),
 		}
 
@@ -308,12 +322,16 @@ func (l *LoggingInterceptor) UnaryInterceptor() grpc.UnaryServerInterceptor {
 // StreamInterceptor returns the stream interceptor
 func (l *LoggingInterceptor) StreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		l.logger.Debug("stream started", zap.String("method", info.FullMethod))
+		method := ""
+		if info != nil {
+			method = info.FullMethod
+		}
+		l.logger.Debug("stream started", zap.String("method", method))
 		err := handler(srv, ss)
 		if err != nil {
-			l.logger.Warn("stream ended with error", zap.String("method", info.FullMethod), zap.Error(err))
+			l.logger.Warn("stream ended with error", zap.String("method", method), zap.Error(err))
 		} else {
-			l.logger.Debug("stream completed", zap.String("method", info.FullMethod))
+			l.logger.Debug("stream completed", zap.String("method", method))
 		}
 		return err
 	}

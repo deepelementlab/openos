@@ -74,10 +74,10 @@ message Tenant {
 // Tenant status
 enum TenantStatus {
   TENANT_STATUS_UNSPECIFIED = 0;
-  ACTIVE = 1;
-  SUSPENDED = 2;
-  PENDING = 3;
-  DEACTIVATED = 4;
+  TENANT_STATUS_ACTIVE = 1;
+  TENANT_STATUS_SUSPENDED = 2;
+  TENANT_STATUS_PENDING = 3;
+  TENANT_STATUS_DEACTIVATED = 4;
 }
 
 // Tenant quota details
@@ -119,10 +119,10 @@ message TenantMember {
 // Member role
 enum MemberRole {
   MEMBER_ROLE_UNSPECIFIED = 0;
-  OWNER = 1;
-  ADMIN = 2;
-  MEMBER = 3;
-  VIEWER = 4;
+  MEMBER_ROLE_OWNER = 1;
+  MEMBER_ROLE_ADMIN = 2;
+  MEMBER_ROLE_MEMBER = 3;
+  MEMBER_ROLE_VIEWER = 4;
 }
 
 // Create tenant request

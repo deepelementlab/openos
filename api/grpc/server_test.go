@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

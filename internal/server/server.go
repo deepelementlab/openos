@@ -16,11 +16,14 @@ import (
 	"github.com/agentos/aos/internal/data/repository"
 	"github.com/agentos/aos/internal/data/transaction"
 	"github.com/agentos/aos/internal/health"
+	"github.com/agentos/aos/internal/kernel"
 	"github.com/agentos/aos/internal/monitoring"
 	"github.com/agentos/aos/internal/orchestration"
 	"github.com/agentos/aos/internal/orchestration/workflow"
 	"github.com/agentos/aos/internal/scheduler"
 	"github.com/agentos/aos/internal/version"
+	runtimefacade "github.com/agentos/aos/pkg/runtime/facade"
+	"github.com/agentos/aos/pkg/runtime/types"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -40,6 +43,8 @@ type Server struct {
 	stateMachineEngine *orchestration.StateMachineEngine
 	healthStatus       string
 	startTime          time.Time
+	kernel             *kernel.Facade
+	runtimeFacade      *runtimefacade.RuntimeFacade
 }
 
 // NewServer creates a new server instance.
@@ -68,6 +73,13 @@ func NewServer(cfg *config.Config, logger *zap.Logger) (*Server, error) {
 		Health:      "healthy",
 	})
 
+	k := kernel.NewDefaultFacade()
+	rf := runtimefacade.NewRuntimeFacade(runtimefacade.WithKernel(k))
+	rtCfg := &types.RuntimeConfig{}
+	if err := rf.Connect(context.Background(), runtimefacade.BackendGVisor, rtCfg); err != nil {
+		logger.Warn("runtime facade not connected (container runtime optional)", zap.Error(err))
+	}
+
 	s := &Server{
 		config:        cfg,
 		logger:        logger,
@@ -78,6 +90,8 @@ func NewServer(cfg *config.Config, logger *zap.Logger) (*Server, error) {
 		outbox:        outboxPublisher,
 		healthStatus:  "healthy",
 		startTime:     time.Now(),
+		kernel:        k,
+		runtimeFacade: rf,
 	}
 
 	// Initialize orchestration engines
@@ -387,6 +401,19 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		s.metrics.IncAPIError(http.MethodPost, "/api/v1/agents", "create_failed")
 		http.Error(w, "failed to create agent", http.StatusInternalServerError)
 		return
+	}
+
+	if s.kernel != nil {
+		ctx := r.Context()
+		if g, err := s.kernel.Process.CreateGroup(ctx, id); err == nil && g != nil {
+			agent.Metadata["kernel_group_id"] = g.GroupID
+		} else if err != nil {
+			s.logger.Debug("kernel process group skipped", zap.Error(err), zap.String("agent_id", id))
+		}
+		if ns, err := s.kernel.Process.CreateNamespace(ctx); err == nil && ns != nil {
+			_ = s.kernel.Process.EnterNamespace(ctx, id, ns)
+			agent.Metadata["kernel_namespace_id"] = ns.NamespaceID
+		}
 	}
 
 	if nodeID, err := s.scheduleAgentBaseline(r.Context(), id); err == nil {

@@ -107,8 +107,20 @@ func printOpenOSLogo(out *os.File, color bool) {
 	}
 }
 
+// BannerExplicitlyDisabled is true only when AOS_NO_BANNER is set to 1, true, yes, or on (case-insensitive).
+// Unset or other values keep the default: show the welcome banner.
+func BannerExplicitlyDisabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("AOS_NO_BANNER")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func printWelcomeBanner() {
-	if os.Getenv("AOS_NO_BANNER") != "" {
+	if BannerExplicitlyDisabled() {
 		return
 	}
 	color := useANSIColor()
@@ -130,17 +142,17 @@ func printWelcomeBanner() {
 	fmt.Fprintln(os.Stdout)
 
 	if color {
-		fmt.Fprintf(os.Stdout, "  %s%s▸ Agent Operating System ◂%s\n", ansiBold, ansiLimeGreen, ansiReset)
-		fmt.Fprintln(os.Stdout, "  OpenOS / AOS - Control Plane · HTTP API · Health Checks · Metrics · Multi-tenancy")
+		fmt.Fprintf(os.Stdout, "  %s%s> Agent Operating System <%s\n", ansiBold, ansiLimeGreen, ansiReset)
+		fmt.Fprintln(os.Stdout, "  OpenOS / AOS - Control Plane | HTTP API | Health Checks | Metrics | Multi-tenancy")
 		fmt.Fprintf(os.Stdout, "  %s%s%s\n", ansiDim, ver, ansiReset)
-		fmt.Fprintf(os.Stdout, "  %sTip: AOS_NO_BANNER=1 to hide · NO_COLOR=1 to disable colors%s\n", ansiDim, ansiReset)
+		fmt.Fprintf(os.Stdout, "  %sTip: AOS_NO_BANNER=1|true|yes|on to hide | NO_COLOR=1 to disable colors | aos doctor%s\n", ansiDim, ansiReset)
 		fmt.Fprintln(os.Stdout)
 		return
 	}
 
-	fmt.Fprintln(os.Stdout, "  ▸ Agent Operating System ◂")
-	fmt.Fprintln(os.Stdout, "  OpenOS / AOS - Control Plane · HTTP API · Health Checks · Metrics · Multi-tenancy")
+	fmt.Fprintln(os.Stdout, "  > Agent Operating System <")
+	fmt.Fprintln(os.Stdout, "  OpenOS / AOS - Control Plane | HTTP API | Health Checks | Metrics | Multi-tenancy")
 	fmt.Fprintf(os.Stdout, "  %s\n", ver)
-	fmt.Fprintln(os.Stdout, "  Tip: AOS_NO_BANNER=1 to hide · AOS_FORCE_COLOR=1 to force colors on Windows")
+	fmt.Fprintln(os.Stdout, "  Tip: AOS_NO_BANNER=1|true|yes|on to hide | AOS_FORCE_COLOR=1 to force colors on Windows | aos doctor")
 	fmt.Fprintln(os.Stdout)
 }

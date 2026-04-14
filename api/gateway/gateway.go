@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
+	"time"
 
-	"github.com/agentos/aos/api/grpc/pb"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Gateway provides HTTP REST API by proxying to gRPC services
@@ -48,36 +48,13 @@ func NewGateway(config Config, logger *zap.Logger) (*Gateway, error) {
 	}, nil
 }
 
-// RegisterServices registers all gRPC services with the gateway
+// RegisterServices registers all gRPC services with the gateway.
+//
+// Full REST mapping requires HTTP annotations in .proto and code generated with
+// protoc-gen-grpc-gateway (see api/proto/README.md). Until that is wired, this
+// is a no-op so the control plane compiles; use gRPC clients or the JSON shim in api/grpc.
 func (g *Gateway) RegisterServices(ctx context.Context) error {
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}
-
-	// Register AgentService
-	if err := pb.RegisterAgentServiceHandlerFromEndpoint(ctx, g.mux, g.grpcAddr, opts); err != nil {
-		return fmt.Errorf("failed to register agent service: %w", err)
-	}
-	g.logger.Info("registered AgentService with gateway")
-
-	// Register TenantService
-	if err := pb.RegisterTenantServiceHandlerFromEndpoint(ctx, g.mux, g.grpcAddr, opts); err != nil {
-		return fmt.Errorf("failed to register tenant service: %w", err)
-	}
-	g.logger.Info("registered TenantService with gateway")
-
-	// Register RuntimeService
-	if err := pb.RegisterRuntimeServiceHandlerFromEndpoint(ctx, g.mux, g.grpcAddr, opts); err != nil {
-		return fmt.Errorf("failed to register runtime service: %w", err)
-	}
-	g.logger.Info("registered RuntimeService with gateway")
-
-	// Register MonitoringService
-	if err := pb.RegisterMonitoringServiceHandlerFromEndpoint(ctx, g.mux, g.grpcAddr, opts); err != nil {
-		return fmt.Errorf("failed to register monitoring service: %w", err)
-	}
-	g.logger.Info("registered MonitoringService with gateway")
-
+	g.logger.Info("gRPC-Gateway: HTTP handler registration skipped (generate gateway stubs from annotated protos to enable)")
 	return nil
 }
 
@@ -113,14 +90,13 @@ func customErrorHandler(ctx context.Context, mux *runtime.ServeMux, marshaler ru
 
 	w.Header().Set("Content-type", marshaler.ContentType(nil))
 
-	// Extract gRPC status error
-	grpcCode := runtime.HTTPStatusFromCode(grpc.Code(err))
+	st, _ := status.FromError(err)
+	grpcCode := runtime.HTTPStatusFromCode(st.Code())
 	w.WriteHeader(grpcCode)
 
-	// Format error response
 	errorBody := map[string]interface{}{
-		"error":   grpc.Code(err).String(),
-		"message": grpc.ErrorDesc(err),
+		"error":   st.Code().String(),
+		"message": st.Message(),
 		"code":    grpcCode,
 	}
 
@@ -135,19 +111,17 @@ func customErrorHandler(ctx context.Context, mux *runtime.ServeMux, marshaler ru
 
 // customMetadataHandler extracts metadata from HTTP headers
 func customMetadataHandler(ctx context.Context, r *http.Request) metadata.MD {
-	md := make(map[string][]string)
-
-	// Extract tenant ID from header
+	var pairs []string
 	if tenantID := r.Header.Get("X-Tenant-ID"); tenantID != "" {
-		md["tenant_id"] = []string{tenantID}
+		pairs = append(pairs, "tenant_id", tenantID)
 	}
-
-	// Extract auth token
 	if auth := r.Header.Get("Authorization"); auth != "" {
-		md["authorization"] = []string{auth}
+		pairs = append(pairs, "authorization", auth)
 	}
-
-	return metadata.New(md)
+	if len(pairs) == 0 {
+		return nil
+	}
+	return metadata.Pairs(pairs...)
 }
 
 // ResponseModifier modifies responses for consistent formatting

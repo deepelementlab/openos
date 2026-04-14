@@ -57,10 +57,10 @@ message Runtime {
 // Runtime status
 enum RuntimeStatus {
   RUNTIME_STATUS_UNSPECIFIED = 0;
-  AVAILABLE = 1;
-  UNAVAILABLE = 2;
-  DEGRADED = 3;
-  MAINTENANCE = 4;
+  RUNTIME_STATUS_AVAILABLE = 1;
+  RUNTIME_STATUS_UNAVAILABLE = 2;
+  RUNTIME_STATUS_DEGRADED = 3;
+  RUNTIME_STATUS_MAINTENANCE = 4;
 }
 
 // Image information
@@ -95,11 +95,11 @@ message Node {
 // Node status
 enum NodeStatus {
   NODE_STATUS_UNSPECIFIED = 0;
-  READY = 1;
-  NOT_READY = 2;
-  SCHEDULING_DISABLED = 3;
-  DRAINING = 4;
-  MAINTENANCE = 5;
+  NODE_STATUS_READY = 1;
+  NODE_STATUS_NOT_READY = 2;
+  NODE_STATUS_SCHEDULING_DISABLED = 3;
+  NODE_STATUS_DRAINING = 4;
+  NODE_STATUS_MAINTENANCE = 5;
 }
 
 // Node resources
@@ -175,10 +175,10 @@ message PullImageProgress {
 // Pull status
 enum PullStatus {
   PULL_STATUS_UNSPECIFIED = 0;
-  PULLING = 1;
-  EXTRACTING = 2;
-  COMPLETED = 3;
-  FAILED = 4;
+  PULL_STATUS_PULLING = 1;
+  PULL_STATUS_EXTRACTING = 2;
+  PULL_STATUS_COMPLETED = 3;
+  PULL_STATUS_FAILED = 4;
 }
 
 // Remove image request

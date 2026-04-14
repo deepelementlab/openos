@@ -9,7 +9,7 @@ import (
 func newDebugCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "debug",
-		Short: "Debug helpers (events, metrics — stub)",
+		Short: "Debug helpers (events, metrics - stub)",
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "events",

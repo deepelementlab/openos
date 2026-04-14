@@ -57,11 +57,11 @@ message HealthCheckResponse {
 // Health status
 enum HealthStatus {
   HEALTH_STATUS_UNSPECIFIED = 0;
-  HEALTHY = 1;
-  UNHEALTHY = 2;
-  DEGRADED = 3;
-  STARTING = 4;
-  SHUTTING_DOWN = 5;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_UNHEALTHY = 2;
+  HEALTH_STATUS_DEGRADED = 3;
+  HEALTH_STATUS_STARTING = 4;
+  HEALTH_STATUS_SHUTTING_DOWN = 5;
 }
 
 // Service health details
@@ -155,10 +155,10 @@ message ServiceStatus {
 // Service state
 enum ServiceState {
   SERVICE_STATE_UNSPECIFIED = 0;
-  RUNNING = 1;
-  STOPPED = 2;
-  FAILED = 3;
-  RECOVERING = 4;
+  SERVICE_STATE_RUNNING = 1;
+  SERVICE_STATE_STOPPED = 2;
+  SERVICE_STATE_FAILED = 3;
+  SERVICE_STATE_RECOVERING = 4;
 }
 
 // Get alerts request
@@ -198,19 +198,19 @@ message Alert {
 // Alert severity
 enum AlertSeverity {
   ALERT_SEVERITY_UNSPECIFIED = 0;
-  INFO = 1;
-  WARNING = 2;
-  CRITICAL = 3;
-  EMERGENCY = 4;
+  ALERT_SEVERITY_INFO = 1;
+  ALERT_SEVERITY_WARNING = 2;
+  ALERT_SEVERITY_CRITICAL = 3;
+  ALERT_SEVERITY_EMERGENCY = 4;
 }
 
 // Alert status
 enum AlertStatus {
   ALERT_STATUS_UNSPECIFIED = 0;
-  FIRING = 1;
-  ACKNOWLEDGED = 2;
-  RESOLVED = 3;
-  SILENCED = 4;
+  ALERT_STATUS_FIRING = 1;
+  ALERT_STATUS_ACKNOWLEDGED = 2;
+  ALERT_STATUS_RESOLVED = 3;
+  ALERT_STATUS_SILENCED = 4;
 }
 
 // Acknowledge alert request

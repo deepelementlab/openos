@@ -36,8 +36,10 @@ func TestFactory_CreateRuntime_GVisor(t *testing.T) {
 
 func TestFactory_CreateRuntime_Kata(t *testing.T) {
 	f := NewFactory()
-	_, err := f.CreateRuntime(context.Background(), "kata", &types.RuntimeConfig{Type: types.RuntimeKata})
-	assert.EqualError(t, err, "kata runtime is not yet supported")
+	rt, err := f.CreateRuntime(context.Background(), "kata", &types.RuntimeConfig{Type: types.RuntimeKata})
+	require.NoError(t, err)
+	require.NotNil(t, rt)
+	assert.Equal(t, types.RuntimeKata, rt.GetRuntimeInfo().Type)
 }
 
 func TestFactory_CreateRuntime_Unsupported(t *testing.T) {

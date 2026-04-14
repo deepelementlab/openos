@@ -60,7 +60,19 @@ Provides observability:
 
 ## Code Generation
 
-To generate Go code from proto files, run:
+Generated Go lives in **`api/grpc/pb`** (`go_package` = `github.com/agentos/aos/api/grpc/pb`).
+Well-known Google protos are vendored under `api/proto/v1/google/protobuf/`.
+
+From repository root `agent-os/implementation`, run:
+
+```bash
+cd api/proto/v1
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.32.0
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
+go run github.com/bufbuild/buf/cmd/buf@v1.28.1 generate
+```
+
+Legacy `protoc` invocation (if you prefer a local `protoc` binary):
 
 ```bash
 # Install protoc plugins

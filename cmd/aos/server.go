@@ -24,6 +24,8 @@ func newServerCmd() *cobra.Command {
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
+	printWelcomeBanner()
+
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)

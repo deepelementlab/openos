@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/agentos/aos/pkg/runtime/interfaces"
@@ -11,8 +14,11 @@ import (
 )
 
 // GVisorRuntime implements interfaces.Runtime using gVisor for enhanced security.
+// When env AOS_RUNSC=1 and runsc is on PATH (Linux), Create/Start/Delete invoke the runsc CLI.
 type GVisorRuntime struct {
 	config *types.RuntimeConfig
+	root   string
+	runsc  string
 }
 
 // NewRuntime is the factory function for gVisor runtime.
@@ -26,6 +32,15 @@ func NewGVisorRuntime() *GVisorRuntime {
 
 func (r *GVisorRuntime) Initialize(_ context.Context, config *types.RuntimeConfig) error {
 	r.config = config
+	r.root = ""
+	if config != nil {
+		r.root = config.RootDir
+	}
+	if r.root == "" {
+		r.root = filepath.Join(os.TempDir(), "aos-gvisor")
+	}
+	_ = os.MkdirAll(r.root, 0o755)
+	r.runsc = resolveRunsc(config)
 	return nil
 }
 
@@ -45,7 +60,7 @@ func (r *GVisorRuntime) GetRuntimeInfo() *types.RuntimeInfo {
 	}
 }
 
-func (r *GVisorRuntime) CreateAgent(_ context.Context, spec *types.AgentSpec) (*types.Agent, error) {
+func (r *GVisorRuntime) CreateAgent(ctx context.Context, spec *types.AgentSpec) (*types.Agent, error) {
 	if spec == nil {
 		return nil, fmt.Errorf("agent spec is required")
 	}
@@ -54,6 +69,11 @@ func (r *GVisorRuntime) CreateAgent(_ context.Context, spec *types.AgentSpec) (*
 	}
 	if spec.Image == "" {
 		return nil, fmt.Errorf("agent image is required")
+	}
+	if r.runscEnabled() {
+		if err := r.runscCreate(ctx, spec); err != nil {
+			return nil, err
+		}
 	}
 	return &types.Agent{
 		ID:        spec.ID,
@@ -65,9 +85,12 @@ func (r *GVisorRuntime) CreateAgent(_ context.Context, spec *types.AgentSpec) (*
 	}, nil
 }
 
-func (r *GVisorRuntime) StartAgent(_ context.Context, agentID string) error {
+func (r *GVisorRuntime) StartAgent(ctx context.Context, agentID string) error {
 	if agentID == "" {
 		return fmt.Errorf("agent ID is required")
+	}
+	if r.runscEnabled() {
+		return r.runscStart(ctx, agentID)
 	}
 	return nil
 }
@@ -79,9 +102,12 @@ func (r *GVisorRuntime) StopAgent(_ context.Context, agentID string, _ time.Dura
 	return nil
 }
 
-func (r *GVisorRuntime) DeleteAgent(_ context.Context, agentID string) error {
+func (r *GVisorRuntime) DeleteAgent(ctx context.Context, agentID string) error {
 	if agentID == "" {
 		return fmt.Errorf("agent ID is required")
+	}
+	if r.runscEnabled() {
+		return r.runscDelete(ctx, agentID)
 	}
 	return nil
 }
@@ -148,7 +174,15 @@ func (r *GVisorRuntime) AttachAgent(_ context.Context, agentID string, _ *types.
 	return nil, fmt.Errorf("attach not implemented yet")
 }
 
-func (r *GVisorRuntime) HealthCheck(_ context.Context) error { return nil }
+func (r *GVisorRuntime) HealthCheck(ctx context.Context) error {
+	if r.runsc != "" {
+		cmd := exec.CommandContext(ctx, r.runsc, "--version")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("runsc: %w", err)
+		}
+	}
+	return nil
+}
 func (r *GVisorRuntime) Cleanup(_ context.Context) error     { return nil }
 
 type gvisorEmptyReader struct{}

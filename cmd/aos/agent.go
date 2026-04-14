@@ -9,7 +9,7 @@ import (
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "Manage agents (create, list, delete — stubs for AOS roadmap)",
+		Short: "Manage agents (create, list, delete - stubs for AOS roadmap)",
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "create",

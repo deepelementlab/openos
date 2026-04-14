@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agentos/aos/api/grpc/pb"
 	"github.com/agentos/aos/internal/tenant"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TenantServiceServer implements the gRPC TenantService
 type TenantServiceServer struct {
+	pb.UnimplementedTenantServiceServer
 	logger       *zap.Logger
 	tenantRepo   tenant.TenantRepository
 	quotaManager tenant.QuotaManager
@@ -29,7 +32,7 @@ func NewTenantServiceServer(logger *zap.Logger, tenantRepo tenant.TenantReposito
 }
 
 // CreateTenant creates a new tenant
-func (s *TenantServiceServer) CreateTenant(ctx context.Context, req *CreateTenantRequest) (*Tenant, error) {
+func (s *TenantServiceServer) CreateTenant(ctx context.Context, req *pb.CreateTenantRequest) (*pb.Tenant, error) {
 	logger := s.logger.With(zap.String("method", "CreateTenant"))
 
 	// Validate request
@@ -91,7 +94,7 @@ func (s *TenantServiceServer) CreateTenant(ctx context.Context, req *CreateTenan
 }
 
 // GetTenant retrieves a tenant by ID
-func (s *TenantServiceServer) GetTenant(ctx context.Context, req *GetTenantRequest) (*Tenant, error) {
+func (s *TenantServiceServer) GetTenant(ctx context.Context, req *pb.GetTenantRequest) (*pb.Tenant, error) {
 	logger := s.logger.With(zap.String("method", "GetTenant"), zap.String("tenant_id", req.TenantId))
 
 	// Get tenant from repository
@@ -130,7 +133,7 @@ func (s *TenantServiceServer) GetTenant(ctx context.Context, req *GetTenantReque
 }
 
 // ListTenants lists all tenants (admin only)
-func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsRequest) (*ListTenantsResponse, error) {
+func (s *TenantServiceServer) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (*pb.ListTenantsResponse, error) {
 	logger := s.logger.With(zap.String("method", "ListTenants"))
 
 	// Check admin permission
@@ -152,9 +155,9 @@ func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsR
 
 	// Apply status filter
 	var filtered []*tenant.Tenant
-	if req.Status != TenantStatus_TENANT_STATUS_UNSPECIFIED {
+	if req.Status != pb.TenantStatus_TENANT_STATUS_UNSPECIFIED {
 		for _, t := range tenants {
-			if string(t.Status) == req.Status.String() {
+			if tenantDomainStatusToPB(t.Status) == req.Status {
 				filtered = append(filtered, t)
 			}
 		}
@@ -175,11 +178,18 @@ func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsR
 
 	// Calculate pagination
 	total := len(filtered)
-	page := int(req.Pagination.Page)
+	page, pageSize := 1, 20
+	if req.Pagination != nil {
+		if req.Pagination.Page > 0 {
+			page = int(req.Pagination.Page)
+		}
+		if req.Pagination.PageSize > 0 {
+			pageSize = int(req.Pagination.PageSize)
+		}
+	}
 	if page < 1 {
 		page = 1
 	}
-	pageSize := int(req.Pagination.PageSize)
 	if pageSize < 1 {
 		pageSize = 20
 	}
@@ -197,7 +207,7 @@ func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsR
 	paginated := filtered[start:end]
 
 	// Convert to proto
-	protoTenants := make([]*Tenant, len(paginated))
+	protoTenants := make([]*pb.Tenant, len(paginated))
 	for i, t := range paginated {
 		protoTenants[i] = s.tenantToProto(t)
 	}
@@ -207,9 +217,9 @@ func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsR
 		pages = 1
 	}
 
-	return &ListTenantsResponse{
+	return &pb.ListTenantsResponse{
 		Tenants: protoTenants,
-		Pagination: &PaginationResponse{
+		Pagination: &pb.PaginationResponse{
 			Page:     int32(page),
 			PageSize: int32(pageSize),
 			Total:    int32(total),
@@ -219,7 +229,7 @@ func (s *TenantServiceServer) ListTenants(ctx context.Context, req *ListTenantsR
 }
 
 // UpdateTenant updates an existing tenant
-func (s *TenantServiceServer) UpdateTenant(ctx context.Context, req *UpdateTenantRequest) (*Tenant, error) {
+func (s *TenantServiceServer) UpdateTenant(ctx context.Context, req *pb.UpdateTenantRequest) (*pb.Tenant, error) {
 	logger := s.logger.With(zap.String("method", "UpdateTenant"), zap.String("tenant_id", req.TenantId))
 
 	// Get existing tenant
@@ -259,12 +269,11 @@ func (s *TenantServiceServer) UpdateTenant(ctx context.Context, req *UpdateTenan
 }
 
 // DeleteTenant deletes a tenant
-func (s *TenantServiceServer) DeleteTenant(ctx context.Context, req *DeleteTenantRequest) (*Empty, error) {
+func (s *TenantServiceServer) DeleteTenant(ctx context.Context, req *pb.DeleteTenantRequest) (*pb.Empty, error) {
 	logger := s.logger.With(zap.String("method", "DeleteTenant"), zap.String("tenant_id", req.TenantId))
 
-	// Get existing tenant
-	t, err := s.tenantRepo.Get(ctx, req.TenantId)
-	if err != nil {
+	// Get existing tenant (must exist)
+	if _, err := s.tenantRepo.Get(ctx, req.TenantId); err != nil {
 		logger.Error("failed to get tenant", zap.Error(err))
 		return nil, status.Error(codes.NotFound, "tenant not found")
 	}
@@ -295,11 +304,11 @@ func (s *TenantServiceServer) DeleteTenant(ctx context.Context, req *DeleteTenan
 
 	logger.Info("tenant deleted")
 
-	return &Empty{}, nil
+	return &pb.Empty{}, nil
 }
 
 // GetTenantQuota retrieves tenant quota
-func (s *TenantServiceServer) GetTenantQuota(ctx context.Context, req *GetTenantQuotaRequest) (*TenantQuota, error) {
+func (s *TenantServiceServer) GetTenantQuota(ctx context.Context, req *pb.GetTenantQuotaRequest) (*pb.TenantQuota, error) {
 	logger := s.logger.With(zap.String("method", "GetTenantQuota"), zap.String("tenant_id", req.TenantId))
 
 	// Get tenant
@@ -329,16 +338,16 @@ func (s *TenantServiceServer) GetTenantQuota(ctx context.Context, req *GetTenant
 
 	overallPercent = max(agentsPercent, cpuPercent, memPercent)
 
-	return &TenantQuota{
+	return &pb.TenantQuota{
 		TenantId: req.TenantId,
-		Allowed: &ResourceQuota{
+		Allowed: &pb.ResourceQuota{
 			MaxAgents:     int32(t.Quota.MaxAgents),
 			MaxCpuCores:   int32(t.Quota.MaxCPU),
 			MaxMemoryGb:   int32(t.Quota.MaxMemoryGB),
 			MaxStorageGb:  int32(t.Quota.MaxStorageGB),
 			MaxGpu:        int32(t.Quota.MaxGPU),
 		},
-		Used: &ResourceUsage{
+		Used: &pb.ResourceUsage{
 			AgentsCount:   int32(usage.AgentsCount),
 			CpuCoresUsed:  int32(usage.CPUCoresUsed),
 			MemoryGbUsed:  int32(usage.MemoryGBUsed),
@@ -350,7 +359,7 @@ func (s *TenantServiceServer) GetTenantQuota(ctx context.Context, req *GetTenant
 }
 
 // UpdateTenantQuota updates tenant quota (admin only)
-func (s *TenantServiceServer) UpdateTenantQuota(ctx context.Context, req *UpdateTenantQuotaRequest) (*TenantQuota, error) {
+func (s *TenantServiceServer) UpdateTenantQuota(ctx context.Context, req *pb.UpdateTenantQuotaRequest) (*pb.TenantQuota, error) {
 	logger := s.logger.With(zap.String("method", "UpdateTenantQuota"), zap.String("tenant_id", req.TenantId))
 
 	// Check admin permission
@@ -391,11 +400,11 @@ func (s *TenantServiceServer) UpdateTenantQuota(ctx context.Context, req *Update
 	logger.Info("tenant quota updated")
 
 	// Return updated quota
-	return s.GetTenantQuota(ctx, &GetTenantQuotaRequest{TenantId: req.TenantId})
+	return s.GetTenantQuota(ctx, &pb.GetTenantQuotaRequest{TenantId: req.TenantId})
 }
 
 // GetTenantUsage retrieves tenant resource usage
-func (s *TenantServiceServer) GetTenantUsage(ctx context.Context, req *GetTenantUsageRequest) (*TenantUsage, error) {
+func (s *TenantServiceServer) GetTenantUsage(ctx context.Context, req *pb.GetTenantUsageRequest) (*pb.TenantUsage, error) {
 	logger := s.logger.With(zap.String("method", "GetTenantUsage"), zap.String("tenant_id", req.TenantId))
 
 	// Check access
@@ -416,10 +425,10 @@ func (s *TenantServiceServer) GetTenantUsage(ctx context.Context, req *GetTenant
 		return nil, status.Error(codes.Internal, "failed to get usage")
 	}
 
-	return &TenantUsage{
+	return &pb.TenantUsage{
 		TenantId:        req.TenantId,
 		TotalAgents:     int32(usage.AgentsCount),
-		Resources: &ResourceUsage{
+		Resources: &pb.ResourceUsage{
 			AgentsCount:   int32(usage.AgentsCount),
 			CpuCoresUsed:  int32(usage.CPUCoresUsed),
 			MemoryGbUsed:  int32(usage.MemoryGBUsed),
@@ -428,7 +437,7 @@ func (s *TenantServiceServer) GetTenantUsage(ctx context.Context, req *GetTenant
 }
 
 // AddTenantMember adds a member to a tenant
-func (s *TenantServiceServer) AddTenantMember(ctx context.Context, req *AddTenantMemberRequest) (*TenantMember, error) {
+func (s *TenantServiceServer) AddTenantMember(ctx context.Context, req *pb.AddTenantMemberRequest) (*pb.TenantMember, error) {
 	logger := s.logger.With(zap.String("method", "AddTenantMember"), zap.String("tenant_id", req.TenantId))
 
 	// Check permission
@@ -447,7 +456,7 @@ func (s *TenantServiceServer) AddTenantMember(ctx context.Context, req *AddTenan
 		TenantID: req.TenantId,
 		UserID:   req.Email, // Using email as user ID
 		Email:    req.Email,
-		Role:     req.Role.String(),
+		Role:     memberRolePBToString(req.Role),
 	}
 
 	if claims, ok := AuthClaimsFromContext(ctx); ok {
@@ -461,16 +470,17 @@ func (s *TenantServiceServer) AddTenantMember(ctx context.Context, req *AddTenan
 
 	logger.Info("member added", zap.String("email", req.Email))
 
-	return &TenantMember{
+	return &pb.TenantMember{
 		TenantId: req.TenantId,
 		UserId:   member.UserID,
 		Email:    member.Email,
-		Role:     MemberRole(MemberRole_value[member.Role]),
+		Name:     member.Name,
+		Role:     memberRoleStringToPB(member.Role),
 	}, nil
 }
 
 // RemoveTenantMember removes a member from a tenant
-func (s *TenantServiceServer) RemoveTenantMember(ctx context.Context, req *RemoveTenantMemberRequest) (*Empty, error) {
+func (s *TenantServiceServer) RemoveTenantMember(ctx context.Context, req *pb.RemoveTenantMemberRequest) (*pb.Empty, error) {
 	logger := s.logger.With(zap.String("method", "RemoveTenantMember"), zap.String("tenant_id", req.TenantId))
 
 	// Check permission
@@ -499,11 +509,11 @@ func (s *TenantServiceServer) RemoveTenantMember(ctx context.Context, req *Remov
 
 	logger.Info("member removed", zap.String("user_id", req.UserId))
 
-	return &Empty{}, nil
+	return &pb.Empty{}, nil
 }
 
 // ListTenantMembers lists tenant members
-func (s *TenantServiceServer) ListTenantMembers(ctx context.Context, req *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
+func (s *TenantServiceServer) ListTenantMembers(ctx context.Context, req *pb.ListTenantMembersRequest) (*pb.ListTenantMembersResponse, error) {
 	logger := s.logger.With(zap.String("method", "ListTenantMembers"), zap.String("tenant_id", req.TenantId))
 
 	// Check access
@@ -526,9 +536,9 @@ func (s *TenantServiceServer) ListTenantMembers(ctx context.Context, req *ListTe
 
 	// Apply role filter
 	var filtered []*tenant.TenantMember
-	if req.Role != MemberRole_MEMBER_ROLE_UNSPECIFIED {
+	if req.Role != pb.MemberRole_MEMBER_ROLE_UNSPECIFIED {
 		for _, m := range members {
-			if m.Role == req.Role.String() {
+			if memberRoleStringToPB(m.Role) == req.Role {
 				filtered = append(filtered, m)
 			}
 		}
@@ -537,25 +547,25 @@ func (s *TenantServiceServer) ListTenantMembers(ctx context.Context, req *ListTe
 	}
 
 	// Convert to proto
-	protoMembers := make([]*TenantMember, len(filtered))
+	protoMembers := make([]*pb.TenantMember, len(filtered))
 	for i, m := range filtered {
-		protoMembers[i] = &TenantMember{
+		protoMembers[i] = &pb.TenantMember{
 			TenantId: m.TenantID,
 			UserId:   m.UserID,
 			Email:    m.Email,
 			Name:     m.Name,
-			Role:     MemberRole(MemberRole_value[m.Role]),
+			Role:     memberRoleStringToPB(m.Role),
 		}
 	}
 
-	return &ListTenantMembersResponse{
+	return &pb.ListTenantMembersResponse{
 		TenantId: req.TenantId,
 		Members:  protoMembers,
 	}, nil
 }
 
 // UpdateTenantMember updates a member's role
-func (s *TenantServiceServer) UpdateTenantMember(ctx context.Context, req *UpdateTenantMemberRequest) (*TenantMember, error) {
+func (s *TenantServiceServer) UpdateTenantMember(ctx context.Context, req *pb.UpdateTenantMemberRequest) (*pb.TenantMember, error) {
 	logger := s.logger.With(zap.String("method", "UpdateTenantMember"))
 
 	// Check permission
@@ -586,7 +596,7 @@ func (s *TenantServiceServer) UpdateTenantMember(ctx context.Context, req *Updat
 	updatedMember := &tenant.TenantMember{
 		TenantID: req.TenantId,
 		UserID:   req.UserId,
-		Role:     req.Role.String(),
+		Role:     memberRolePBToString(req.Role),
 	}
 
 	if err := s.tenantRepo.AddMember(ctx, updatedMember); err != nil {
@@ -596,7 +606,7 @@ func (s *TenantServiceServer) UpdateTenantMember(ctx context.Context, req *Updat
 
 	logger.Info("member role updated", zap.String("user_id", req.UserId))
 
-	return &TenantMember{
+	return &pb.TenantMember{
 		TenantId: req.TenantId,
 		UserId:   req.UserId,
 		Role:     req.Role,
@@ -604,7 +614,7 @@ func (s *TenantServiceServer) UpdateTenantMember(ctx context.Context, req *Updat
 }
 
 // SuspendTenant suspends a tenant
-func (s *TenantServiceServer) SuspendTenant(ctx context.Context, req *SuspendTenantRequest) (*Tenant, error) {
+func (s *TenantServiceServer) SuspendTenant(ctx context.Context, req *pb.SuspendTenantRequest) (*pb.Tenant, error) {
 	logger := s.logger.With(zap.String("method", "SuspendTenant"), zap.String("tenant_id", req.TenantId))
 
 	// Check admin permission
@@ -639,7 +649,7 @@ func (s *TenantServiceServer) SuspendTenant(ctx context.Context, req *SuspendTen
 }
 
 // ActivateTenant activates a suspended tenant
-func (s *TenantServiceServer) ActivateTenant(ctx context.Context, req *ActivateTenantRequest) (*Tenant, error) {
+func (s *TenantServiceServer) ActivateTenant(ctx context.Context, req *pb.ActivateTenantRequest) (*pb.Tenant, error) {
 	logger := s.logger.With(zap.String("method", "ActivateTenant"), zap.String("tenant_id", req.TenantId))
 
 	// Check admin permission
@@ -674,7 +684,7 @@ func (s *TenantServiceServer) ActivateTenant(ctx context.Context, req *ActivateT
 }
 
 // GetTenantStats retrieves tenant statistics
-func (s *TenantServiceServer) GetTenantStats(ctx context.Context, req *GetTenantStatsRequest) (*TenantStats, error) {
+func (s *TenantServiceServer) GetTenantStats(ctx context.Context, req *pb.GetTenantStatsRequest) (*pb.TenantStats, error) {
 	// Check access
 	t, err := s.tenantRepo.Get(ctx, req.TenantId)
 	if err != nil {
@@ -687,7 +697,7 @@ func (s *TenantServiceServer) GetTenantStats(ctx context.Context, req *GetTenant
 
 	// This would typically query analytics data
 	// For now, return placeholder stats
-	return &TenantStats{
+	return &pb.TenantStats{
 		TenantId: req.TenantId,
 		Period:   req.Period,
 	}, nil
@@ -695,15 +705,17 @@ func (s *TenantServiceServer) GetTenantStats(ctx context.Context, req *GetTenant
 
 // Helper methods
 
-func (s *TenantServiceServer) tenantToProto(t *tenant.Tenant) *Tenant {
-	return &Tenant{
-		Id:        t.ID,
-		Name:      t.Name,
-		Status:    TenantStatus(TenantStatus_value[string(t.Status)]),
-		Plan:      t.Plan,
-		Labels:    t.Labels,
-		CreatedAt: timeToProto(t.CreatedAt),
-		UpdatedAt: timeToProto(t.UpdatedAt),
+func (s *TenantServiceServer) tenantToProto(t *tenant.Tenant) *pb.Tenant {
+	return &pb.Tenant{
+		Id:          t.ID,
+		Name:        t.Name,
+		Description: t.Description,
+		Status:      tenantDomainStatusToPB(t.Status),
+		Plan:        t.Plan,
+		Labels:      t.Labels,
+		Metadata:    t.Metadata,
+		CreatedAt:   timestamppb.New(t.CreatedAt),
+		UpdatedAt:   timestamppb.New(t.UpdatedAt),
 	}
 }
 

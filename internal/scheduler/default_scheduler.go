@@ -37,16 +37,21 @@ func (s *DefaultScheduler) Initialize(_ context.Context, cfg *config.Config) err
 func (s *DefaultScheduler) Schedule(_ context.Context, req TaskRequest) (*ScheduleResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	res := s.scheduleLocked(req)
+	return &res, nil
+}
 
+// scheduleLocked performs one scheduling decision; caller must hold s.mu.
+func (s *DefaultScheduler) scheduleLocked(req TaskRequest) ScheduleResult {
 	eligible := s.eligibleNodes(req)
 	if len(eligible) == 0 {
 		s.totalFailed++
-		return &ScheduleResult{
+		return ScheduleResult{
 			Success: false,
 			TaskID:  req.TaskID,
 			Reason:  "no_eligible_node",
 			Message: "no node has enough resources or is healthy",
-		}, nil
+		}
 	}
 
 	selected := eligible[s.rrIndex%len(eligible)]
@@ -59,24 +64,27 @@ func (s *DefaultScheduler) Schedule(_ context.Context, req TaskRequest) (*Schedu
 	}
 
 	s.totalScheduled++
-	return &ScheduleResult{
+	return ScheduleResult{
 		Success:     true,
 		NodeID:      selected.NodeID,
 		TaskID:      req.TaskID,
 		Message:     fmt.Sprintf("scheduled on %s", selected.NodeID),
 		Score:       1.0,
 		ScheduledAt: time.Now(),
-	}, nil
+	}
 }
 
 func (s *DefaultScheduler) ScheduleBatch(ctx context.Context, reqs []TaskRequest) ([]ScheduleResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	results := make([]ScheduleResult, 0, len(reqs))
 	for _, req := range reqs {
-		res, err := s.Schedule(ctx, req)
-		if err != nil {
-			return nil, err
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
 		}
-		results = append(results, *res)
+		results = append(results, s.scheduleLocked(req))
 	}
 	return results, nil
 }

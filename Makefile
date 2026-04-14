@@ -12,10 +12,10 @@ GOLINT := golangci-lint
 GOCOVER := go tool cover
 
 # Build variables
-VERSION := v0.1.0
+VERSION := 0.1.2
 BUILD_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-GO_FLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE) -X main.GitCommit=$(GIT_COMMIT)"
+GO_FLAGS := -ldflags "-X github.com/agentos/aos/internal/version.version=$(VERSION) -X github.com/agentos/aos/internal/version.buildDate=$(BUILD_DATE) -X github.com/agentos/aos/internal/version.gitCommit=$(GIT_COMMIT)"
 
 # Directories
 CMD_DIR := cmd

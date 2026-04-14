@@ -3,7 +3,10 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/agentos/aos/internal/resource/enforcer"
 )
 
 // HardLimit describes maximum resources for a tenant pool.
@@ -11,9 +14,11 @@ type HardLimit struct {
 	TenantID   string
 	MaxCPUNano int64
 	MaxMemory  int64
+	// CgroupGroup is optional relative path under cgroup v2 root (linux).
+	CgroupGroup string
 }
 
-// Enforcer applies hard limits (stub: integrate with internal/resource/enforcer).
+// Enforcer applies hard limits and optional cgroup writes.
 type Enforcer struct {
 	limits map[string]*HardLimit
 }
@@ -31,7 +36,7 @@ func (e *Enforcer) SetHardLimit(l *HardLimit) {
 	e.limits[l.TenantID] = l
 }
 
-// CheckWithinHardLimit returns an error if usage exceeds hard limit (stub values).
+// CheckWithinHardLimit returns ErrResourceExhausted when usage exceeds registered hard limits.
 func (e *Enforcer) CheckWithinHardLimit(ctx context.Context, tenantID string, cpuNano, memBytes int64) error {
 	_ = ctx
 	l := e.limits[tenantID]
@@ -39,10 +44,28 @@ func (e *Enforcer) CheckWithinHardLimit(ctx context.Context, tenantID string, cp
 		return nil
 	}
 	if l.MaxMemory > 0 && memBytes > l.MaxMemory {
-		return fmt.Errorf("quota: tenant %s exceeds memory hard limit", tenantID)
+		return fmt.Errorf("%w: tenant %s memory %d > limit %d", ErrResourceExhausted, tenantID, memBytes, l.MaxMemory)
 	}
 	if l.MaxCPUNano > 0 && cpuNano > l.MaxCPUNano {
-		return fmt.Errorf("quota: tenant %s exceeds CPU hard limit", tenantID)
+		return fmt.Errorf("%w: tenant %s cpu %d > limit %d", ErrResourceExhausted, tenantID, cpuNano, l.MaxCPUNano)
 	}
 	return nil
+}
+
+// ApplyCgroupForTenant writes cgroup v2 limits when CgroupGroup is set (Linux + unified v2).
+func (e *Enforcer) ApplyCgroupForTenant(tenantID string, cpuMax, memMax, ioMax string) error {
+	l := e.limits[tenantID]
+	if l == nil || l.CgroupGroup == "" {
+		return nil
+	}
+	return enforcer.ApplyCgroupV2Limits(l.CgroupGroup, enforcer.CgroupLimits{
+		CPUMax:    cpuMax,
+		MemoryMax: memMax,
+		IOMax:     ioMax,
+	})
+}
+
+// IsResourceExhausted reports whether err is a quota exhaustion.
+func IsResourceExhausted(err error) bool {
+	return err != nil && errors.Is(err, ErrResourceExhausted)
 }

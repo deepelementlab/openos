@@ -99,6 +99,89 @@ func (pm *PoolManager) Close() {
 	pm.closed = true
 }
 
+// DynamicTuneConfig drives automatic max_open / max_idle adjustment from sql.DB stats.
+type DynamicTuneConfig struct {
+	MinOpen     int     // floor for MaxOpenConns
+	MaxOpen     int     // ceiling for MaxOpenConns
+	MinIdle     int
+	MaxIdle     int     // usually <= MaxOpen
+	TargetUtil  float64 // desired in_use/open ratio (e.g. 0.65)
+	WaitPressure int64  // if WaitCount delta exceeds this per tick, scale up
+}
+
+// DefaultDynamicTuneConfig returns conservative production defaults.
+func DefaultDynamicTuneConfig() DynamicTuneConfig {
+	return DynamicTuneConfig{
+		MinOpen:      10,
+		MaxOpen:      200,
+		MinIdle:      2,
+		MaxIdle:      50,
+		TargetUtil:   0.65,
+		WaitPressure: 10,
+	}
+}
+
+// TuneBasedOnLoad adjusts pool sizes using current stats and base config.
+// Pass previous WaitCount to compute delta waits since last tick.
+func (pm *PoolManager) TuneBasedOnLoad(cfg *Config, tune DynamicTuneConfig, prevWaitCount int64) (*Config, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("nil config")
+	}
+	stats, err := pm.Stats()
+	if err != nil {
+		return nil, err
+	}
+	next := *cfg
+	open := stats.OpenConnections
+	if open == 0 {
+		open = 1
+	}
+	util := float64(stats.InUse) / float64(open)
+	waitDelta := stats.WaitCount - prevWaitCount
+	changed := false
+
+	if waitDelta >= tune.WaitPressure || util > tune.TargetUtil+0.15 {
+		next.MaxOpenConns = minInt(tune.MaxOpen, cfg.MaxOpenConns+maxInt(1, cfg.MaxOpenConns/10))
+		next.MaxIdleConns = minInt(tune.MaxIdle, maxInt(tune.MinIdle, next.MaxOpenConns/4))
+		changed = true
+	} else if util < tune.TargetUtil-0.2 && cfg.MaxOpenConns > tune.MinOpen {
+		next.MaxOpenConns = maxInt(tune.MinOpen, cfg.MaxOpenConns-maxInt(1, cfg.MaxOpenConns/20))
+		next.MaxIdleConns = maxInt(tune.MinIdle, minInt(tune.MaxIdle, next.MaxOpenConns/4))
+		changed = true
+	}
+
+	if next.MaxIdleConns > next.MaxOpenConns {
+		next.MaxIdleConns = next.MaxOpenConns
+	}
+	if !changed {
+		return &next, nil
+	}
+	if err := pm.Reconfigure(&next); err != nil {
+		return nil, err
+	}
+	pm.logger.Info("pool dynamic tune",
+		zap.Int("max_open", next.MaxOpenConns),
+		zap.Int("max_idle", next.MaxIdleConns),
+		zap.Float64("utilization", util),
+		zap.Int64("wait_delta", waitDelta),
+	)
+	return &next, nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 type PoolStats struct {
 	MaxOpenConnections int           `json:"max_open_connections"`
 	OpenConnections    int           `json:"open_connections"`

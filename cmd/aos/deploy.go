@@ -12,7 +12,7 @@ func newDeployCmd() *cobra.Command {
 		Short: "Apply declarative deployments (stub)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, _ = cmd, args
-			fmt.Println("deploy: stub — integrate with internal/deployment pipeline")
+			fmt.Println("deploy: stub - integrate with internal/deployment pipeline")
 			return nil
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -54,4 +55,11 @@ func TestAOSPipeline_Minimal(t *testing.T) {
 	g := slo.NewGate()
 	g.MinStartSuccessRate = 0.5
 	require.NoError(t, g.Evaluate(col))
+
+	// Rescheduler: node failure → unhealthy
+	rs := closure.NewRescheduler()
+	rs.RecordHeartbeat("node-a", time.Now())
+	require.True(t, rs.IsNodeHealthy("node-a"))
+	rs.MarkNodeFailed("node-a")
+	require.False(t, rs.IsNodeHealthy("node-a"))
 }
