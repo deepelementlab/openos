@@ -3,6 +3,10 @@
 </p>
 
 <h1 align="center">OpenOS</h1>
+<p align="center">
+  <strong>一个以 Agent 为内核原生设计的应用操作系统。欢迎加入我们，一起探索与共创。
+</strong>
+</p>
 
 <p align="center">
   <a href="https://github.com/deepelementlab/clawcode/releases">
