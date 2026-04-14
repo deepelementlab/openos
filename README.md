@@ -127,6 +127,8 @@ AOS combines **declarative agent packages** (build → registry) with **runtime 
 
 ## System Architecture
 
+OpenOS is described as **five logical layers** plus an explicit **thin data layer** and **dual state machines** (control vs. consistency). Diagrams render on GitHub (Mermaid).
+
 ```mermaid
 flowchart TB
   subgraph cli [CLI]
@@ -291,34 +293,83 @@ flowchart TB
 
 ## Quick start
 
-From the **implementation** module:
+Get the **reference implementation** (`agent-os/implementation`) building and running on your machine.
+
+### Prerequisites
+
+| Requirement | Notes |
+|---------------|--------|
+| **Go** | 1.22 or newer ([downloads](https://go.dev/dl/)) |
+| **GNU Make** | Optional; used by `Makefile` shortcuts |
+| **Backend services** | Some tests and production configs expect **PostgreSQL**, **Redis**, and/or **NATS** — adjust `configs/config.yaml` or environment to match your setup |
+
+### Build
+
+From the repository root:
 
 ```bash
 cd agent-os/implementation
 go mod download
-make build          # output: bin/aos
+make build    # writes bin/aos
 ```
 
-Run with the sample config (adjust DB/Redis/NATS to your environment):
+Cross-compilation shortcuts (when using Make): `make build-linux`, `make build-darwin`, `make build-windows`.
+
+### Run
+
+Point the binary at the sample configuration and tune data stores / messaging for your environment:
 
 ```bash
 ./bin/aos --config configs/config.yaml
-# or: go run ./cmd/aos --config configs/config.yaml
 ```
 
-**Tests:**
+Equivalent without a prior build:
 
 ```bash
-# Full module test (recommended for contributors)
+go run ./cmd/aos --config configs/config.yaml
+```
+
+### Test
+
+```bash
+# Full module (recommended before contributing)
 go test -race ./...
 
-# Makefile shortcut (pkg + internal packages)
+# Makefile shortcut (selected packages)
 make test
 ```
 
-Some integration paths expect **PostgreSQL**, **Redis**, or **NATS** to be available; if a test fails on connection, check env-specific `test` or `e2e` packages and your local services.
+> **Note:** Connection-related failures usually mean a required service is not running or `test` / `e2e` packages expect specific hosts — see the failing package and your local Postgres/Redis/NATS endpoints.
 
-**Other Makefile targets:** `make lint`, `make coverage`, `make run`, cross-builds `build-linux` / `build-darwin` / `build-windows`.
+### Lint, coverage, and other targets
+
+```bash
+make lint
+make coverage
+make run
+```
+
+Full target list: [`agent-os/implementation/Makefile`](agent-os/implementation/Makefile).
+
+### Publish the implementation tree (optional)
+
+To copy the entire `implementation/` project (for packaging or deployment) into another directory:
+
+**Windows (PowerShell)**
+
+```powershell
+cd agent-os/scripts
+.\publish-implementation.ps1 -Destination "D:\path\to\release"
+# Optional: -Clean (clear target first), -IncludeParentFolder, -UseMirror (robocopy /MIR)
+```
+
+**Linux / macOS**
+
+```bash
+chmod +x agent-os/scripts/publish-implementation.sh   # once
+./agent-os/scripts/publish-implementation.sh /path/to/release
+# Optional: -c (clean target subtree), -p (keep implementation/ parent folder)
+```
 
 ---
 
